@@ -58,7 +58,7 @@ docpack/<archivo>/
   secciones/      NN-<título>.md
   tablas/         Tnn.csv, index.json
   figuras/        Fnn.<ext>, index.json
-  paginas/        pNNN.png  (solo PDF, solo Windows)
+  paginas/        pNNN.png  (cada página como imagen, de un PDF o de un Word)
 ```
 
 El pack se considera al día cuando `manifest.json` tiene la misma huella SHA-256

@@ -23,11 +23,14 @@ locally (no tokens are spent converting). The original file is never changed.
 2. **Read the original only when the person explicitly asks for it** (for
    example "lee el PDF original" or "mira la página 4 del PDF"). Then use Read
    with the `pages` parameter for exactly the pages they named.
-3. **Cite where things come from**: section title and page (the pack keeps
-   `<!-- página N -->` markers in PDF text).
-4. **State the limits the pack states.** `manifest.json` → `notes` says what the
-   extraction could not do (no OCR for scanned PDFs, PDF tables kept as text,
-   Word has no page numbers). Do not present a doubtful extraction as exact.
+3. **Cite where things come from**: section title and page (sections carry
+   their pages, and PDF text keeps `<!-- página N -->` markers).
+4. **State the limits the pack states.** `manifest.json` → `notes` says how the
+   pack was made and what it could not do (which engine paginated a Word
+   document, which pages were read by OCR, a PDF table without borders kept as
+   text, a missing engine). Text marked `texto por OCR` may have recognition
+   errors: for a critical figure, look at that page's image. Do not present a
+   doubtful extraction as exact.
 
 ## Building a pack yourself
 
@@ -40,7 +43,7 @@ docpack build "<path to document>" --project "<project folder>"
 
 It prints the pack path. `status: up_to_date` means the pack already matched the
 document's SHA-256 and nothing was rebuilt. Add `--force` to rebuild anyway and
-`--no-pages` to skip page images.
+`--no-pages` to skip page images and Word pagination (the fastest build).
 
 ## What a pack contains
 
@@ -51,7 +54,7 @@ docpack/<file name>/
   secciones/      01-<title>.md …   (tables and figures are referenced, not repeated)
   tablas/         T01.csv …, index.json
   figuras/        F01.png …, index.json   (images embedded in Word)
-  paginas/        p001.png …        (PDF on Windows)
+  paginas/        p001.png …        (every page as an image, PDF or Word)
 ```
 
 ## Attachments

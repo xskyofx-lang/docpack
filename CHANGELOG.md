@@ -1,5 +1,18 @@
 # Cambios
 
+## 0.3.0
+
+- Páginas en Word: con Microsoft Word o LibreOffice instalados, cada sección
+  lleva su página y el pack trae la imagen de cada página. Sin ellos, el pack
+  lo dice y se cita por sección y línea.
+- Tablas en PDF: se detectan por sus bordes y salen en CSV, con celdas
+  combinadas, encabezados sombreados y tablas que siguen en la página
+  siguiente.
+- OCR de páginas escaneadas con el motor del sistema: OCR de Windows, Vision
+  en macOS o Tesseract en Linux. El texto queda marcado como OCR.
+- Imágenes de página también en macOS (Core Graphics) y Linux (`pdftoppm`).
+- `--no-pages` ahora también omite la paginación de los Word.
+
 ## 0.2.0 · primera versión pública
 
 - El repositorio se separa en `engine/` (motor y comando) y `plugins/claude-code/`

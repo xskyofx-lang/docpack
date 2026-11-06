@@ -47,5 +47,9 @@ fn each_word_section_takes_the_page_of_its_heading() {
     assert_eq!(page("Alcance"), Some(1.into()), "{index}");
     assert_eq!(page("Validaciones"), Some(3.into()), "{index}");
     assert_eq!(index["pages"], 3);
-    assert_eq!(built.page_images > 0, cfg!(windows), "las imágenes de página salen del PDF que dio el motor");
+    // The page images come from the PDF the engine laid out: one per page,
+    // unless this system has no renderer and the pack says so.
+    if !notes.contains("Imágenes de página no generadas") {
+        assert_eq!(built.page_images, 3, "{notes}");
+    }
 }

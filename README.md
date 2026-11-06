@@ -41,6 +41,8 @@ tokens en toda la conversación.
 |---|---:|
 | Convertir el diseño de 88 000 tokens | 0.14 a 0.3 s |
 | Seis documentos de prueba (Word, Excel, PDF) | 139 a 295 ms cada uno |
+| Paginar un Word de 108 páginas con Word, con sus imágenes de página | 20 a 30 s, solo la primera vez |
+| OCR de una página escaneada | ~0.5 s |
 | Volver a abrir un documento sin cambios | instantáneo: se reusa el pack por su huella SHA-256 |
 | Tokens gastados al convertir | **0**, todo pasa en tu máquina |
 
@@ -53,19 +55,18 @@ tokens en toda la conversación.
 | Error de la estimación de tokens del índice | **−1.4 %** (86 904 estimados, ~88 120 medidos) |
 | Peso del índice tras optimizarlo | 19 105 → 7 829 caracteres (**−59 %**) |
 | Imagen repetida en el documento | se guarda una vez y se referencia dos |
-
-La primera versión tenía 11 fallas contra la lectura directa: símbolos
-perdidos, saltos de línea en celdas, niveles de lista, una estimación de
-tokens que se quedaba a la mitad, entre otras. Están todas corregidas y con su
-prueba automática; la lista está en el [CHANGELOG](CHANGELOG.md).
+| Páginas del Word (paginado por Word) | **33 de 33** secciones en su página correcta |
+| Tablas del mismo diseño exportado a PDF | **6 258 de 6 323** celdas iguales a las del Word (99 %) |
+| Página escaneada (solo imagen, sin texto) | texto completo con el OCR del sistema |
 
 ### El paquete
 
 | | |
 |---|---:|
-| Ejecutable | ~2.8 MB, sin dependencias |
+| Ejecutable | ~3 MB, sin dependencias |
 | Necesita internet | no |
-| Necesita Python, Node u Office | no |
+| Necesita Python o Node | no |
+| Necesita Office | no; si hay Word o LibreOffice, los Word salen con número de página |
 
 Los números cambian con cada documento, pero la idea se mantiene: **pagas por
 lo que lees, no por el documento entero.**
@@ -94,10 +95,16 @@ Eso es todo. No hay que instalar Python, ni Rust, ni nada más: el plugin trae
 el ejecutable de DocPack ya compilado.
 
 **Sistemas:** Windows (x64), Linux (x64 y ARM64) y macOS (Apple Silicon e
-Intel). El plugin trae el ejecutable de cada uno y elige solo el que toca. La
-única diferencia: las imágenes de página de los PDF (`paginas/`) por ahora se
-generan solo en Windows; en Linux y macOS el texto, las secciones y las tablas
-salen igual, y el pack avisa en `manifest.json` que no hay imágenes.
+Intel). El plugin trae el ejecutable de cada uno y elige solo el que toca.
+
+Algunas funciones usan lo que tu sistema ya trae. Si falta algo, el pack se
+crea igual y `manifest.json` dice qué no se pudo hacer y por qué:
+
+| Función | Windows | macOS | Linux |
+|---|---|---|---|
+| Imágenes de página | incluido en Windows | incluido en macOS | `pdftoppm` (paquete `poppler-utils`) |
+| OCR de páginas escaneadas | OCR de Windows, en los idiomas de tu perfil | Vision de macOS, en tus idiomas | `tesseract` con sus idiomas (por ejemplo `tesseract-ocr-spa`) |
+| Números de página en Word | Microsoft Word o LibreOffice | LibreOffice | LibreOffice |
 
 ## Cómo usarlo sin gastar tokens de más
 
@@ -131,8 +138,9 @@ del archivo y vuelve a convertirlo la siguiente vez que Claude lo lea.
 ## Cómo funciona por dentro
 
 Todo pasa en tu máquina. DocPack no se conecta a internet, no manda el
-documento a ningún lado y no usa ninguna IA para convertirlo: lee la estructura
-que el propio archivo ya trae.
+documento a ningún lado y no usa servicios externos: lee la estructura que el
+propio archivo ya trae y, cuando hace falta, usa los motores que tu sistema
+tiene instalados (OCR, Word o LibreOffice para paginar).
 
 1. Claude intenta leer `diseno.docx`.
 2. Antes de que esa lectura ocurra, el plugin (un *hook* de Claude Code)
@@ -154,27 +162,46 @@ tu-proyecto/
       secciones/      01-objetivo.md, 02-alcance.md …
       tablas/         T01.csv … e index.json
       figuras/        F01.png …  (imágenes del Word) e index.json
-      paginas/        p001.png … (cada página del PDF como imagen, en Windows)
+      paginas/        p001.png … (cada página como imagen, de un PDF o de un Word)
 ```
 
 Cómo se parte cada formato:
 
 | Formato | Secciones | Tablas | Además |
 |---|---|---|---|
-| Word (DOCX) | una por cada título, según los estilos del documento | CSV | imágenes en `figuras/`, listas con su nivel, encabezados y pies |
-| PDF | según los marcadores del PDF; si no tiene, una por página | se quedan como texto | imagen de cada página (Windows) |
+| Word (DOCX) | una por cada título, según los estilos del documento | CSV | página de cada sección e imagen de cada página (con Word o LibreOffice), imágenes en `figuras/`, listas con su nivel, encabezados y pies |
+| PDF | según los marcadores del PDF; si no tiene, una por página | CSV, detectadas por sus bordes, aunque sigan en la página siguiente | OCR en las páginas escaneadas, imagen de cada página |
 | Excel (XLSX, XLS, XLSB, ODS) | una por hoja | un CSV por hoja | las fórmulas sin valor guardado se muestran como fórmula |
 | PowerPoint (PPTX) | una por diapositiva, en el orden de la presentación | CSV | número de diapositiva |
 
 Una sección muy larga viene dividida en partes de unos 2 000 tokens con sus
 números de línea, para que Claude lea solo el tramo que importa.
 
-**Lo que todavía no hace** (y lo avisa en `manifest.json` cuando aplica):
+Cómo se sacan las partes que el archivo no trae escritas:
 
-- No hay OCR: un PDF escaneado aparece como «sin texto».
-- Las tablas de un PDF no se detectan como tablas; quedan como texto.
-- Word no guarda números de página, así que en un DOCX las referencias son por
-  sección y línea, no por página.
+- **Páginas de un Word.** Un DOCX no guarda páginas: existen solo cuando un
+  programa acomoda el texto. DocPack le pide a Word (o a LibreOffice), en
+  segundo plano y sobre una copia, que exporte el documento a PDF con un
+  marcador por título, y cada sección toma la página de su título. Si Word ya
+  estaba abierto con documentos tuyos, no lo cierra.
+- **Tablas de un PDF.** Se arman con los bordes que dibuja el PDF y la
+  posición de cada letra: celdas combinadas, encabezados sombreados, palabras
+  que la celda partió en dos renglones y tablas que siguen en la página
+  siguiente bajo el mismo encabezado. Su texto va al CSV y no se repite en la
+  sección.
+- **Páginas escaneadas.** Una página que es sobre todo una imagen pasa por el
+  OCR del sistema. Su texto queda marcado como OCR en la sección
+  (`<!-- página 3 · texto por OCR -->`) y `manifest.json` dice qué motor lo
+  leyó.
+
+Lo que hay que tener en cuenta (y el pack lo avisa cuando aplica):
+
+- Una tabla de PDF sin bordes dibujados no tiene nada que la distinga del
+  texto, así que queda como texto en su sección.
+- El OCR puede equivocarse en letras o números; para un dato crítico, pide ver
+  la imagen de la página.
+- Sin Word ni LibreOffice, las secciones de un Word van sin número de página y
+  se citan por sección y línea.
 
 ## Usarlo sin Claude (línea de comandos)
 
@@ -186,12 +213,12 @@ docpack build diseno.pdf --project .
 ```
 
 Opciones: `--force` reconstruye aunque el pack esté al día y `--no-pages` no
-genera imágenes de página. La salida es un JSON con la ruta del pack y sus
+genera imágenes de página ni pagina los Word (es lo más rápido). La salida es un JSON con la ruta del pack y sus
 números.
 
 ## Actualizaciones
 
-Cada versión del plugin lleva su número en `plugin.json` (por ejemplo `0.2.0`).
+Cada versión del plugin lleva su número en `plugin.json` (por ejemplo `0.3.0`).
 Claude Code se queda con la versión que instalaste hasta que ese número cambia;
 por eso, cuando corrijo algo, publico una versión nueva con otro número.
 
