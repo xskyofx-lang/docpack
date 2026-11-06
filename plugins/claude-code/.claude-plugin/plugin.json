@@ -1,0 +1,14 @@
+{
+  "name": "docpack",
+  "displayName": "DocPack",
+  "version": "0.2.0",
+  "description": "Converts PDF, DOCX, XLSX and PPTX into a local pack (index, sections, CSV tables, page images) so Claude reads only the parts it needs instead of the whole document.",
+  "author": {
+    "name": "Juan Antonio Sandoval Puente",
+    "url": "https://skyoflies.com"
+  },
+  "homepage": "https://github.com/xskyofx-lang/docpack",
+  "repository": "https://github.com/xskyofx-lang/docpack",
+  "license": "MIT",
+  "keywords": ["pdf", "docx", "xlsx", "pptx", "documents", "tokens", "local"]
+}

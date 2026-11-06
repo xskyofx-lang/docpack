@@ -1,0 +1,17 @@
+{
+  "name": "docpack",
+  "owner": {
+    "name": "Juan Antonio Sandoval Puente",
+    "url": "https://skyoflies.com"
+  },
+  "metadata": {
+    "description": "DocPack: local document packs for Claude Code (PDF, DOCX, XLSX, PPTX)."
+  },
+  "plugins": [
+    {
+      "name": "docpack",
+      "source": "./plugins/claude-code",
+      "description": "Local document packs (PDF, DOCX, XLSX, PPTX) so Claude reads only the sections it needs."
+    }
+  ]
+}
