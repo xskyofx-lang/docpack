@@ -15,6 +15,18 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
+      # Linux pagina Word con LibreOffice y lee escaneos con Tesseract; macOS
+      # lee escaneos con Vision. Ahí esas pruebas tienen que correr de verdad.
+      - name: Motores de Linux
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends poppler-utils tesseract-ocr tesseract-ocr-spa libreoffice-writer-nogui
+          echo "DOCPACK_REQUIRE_OCR=1" >> "$GITHUB_ENV"
+          echo "DOCPACK_REQUIRE_LAYOUT=1" >> "$GITHUB_ENV"
+      - name: OCR obligatorio en macOS
+        if: runner.os == 'macOS'
+        run: echo "DOCPACK_REQUIRE_OCR=1" >> "$GITHUB_ENV"
       - name: Pruebas del motor
         run: cargo test --locked --manifest-path engine/Cargo.toml
       - name: Lanzador

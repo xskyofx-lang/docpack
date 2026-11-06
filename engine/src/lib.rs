@@ -68,6 +68,8 @@ pub struct Document {
     pub figures: Vec<Figure>,
     /// Limits of this extraction, stated in the manifest (never hidden).
     pub notes: Vec<String>,
+    /// The OCR engine that read text from page images, when one did.
+    pub ocr: Option<String>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -363,7 +365,7 @@ fn write_pack(dir: &Path, source: &Path, bytes: &[u8], sha: &str, mut doc: Docum
     let manifest = serde_json::json!({
         "docpack_version": VERSION,
         "source": {"file": source.to_string_lossy(), "name": file_name, "sha256": sha, "bytes": bytes.len(), "kind": doc.kind, "pages": doc.pages},
-        "extractor": {"name": "docpack", "version": VERSION, "ocr": false},
+        "extractor": {"name": "docpack", "version": VERSION, "ocr": doc.ocr},
         "stats": {"sections": section_entries.len(), "tables": table_entries.len(), "figures": figure_entries.len(), "page_images": page_images.len(), "tokens_total_estimate": total},
         "notes": doc.notes,
         "original_unchanged": true,

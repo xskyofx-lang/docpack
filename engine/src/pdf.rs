@@ -20,7 +20,7 @@ struct Glyph { x: f64, y: f64, advance: f64, size: f64, text: String, word_start
 type Segment = (f64, f64, f64);
 
 #[derive(Default)]
-struct Page { glyphs: Vec<Glyph>, horizontal: Vec<Segment>, vertical: Vec<Segment>, areas: Vec<Area> }
+struct Page { glyphs: Vec<Glyph>, horizontal: Vec<Segment>, vertical: Vec<Segment>, areas: Vec<Area>, area: f64, image_area: f64 }
 
 /// A filled area (x0, y0, x1, y1): a cell's background, never a line by itself.
 type Area = [f64; 4];
@@ -32,7 +32,10 @@ type Area = [f64; 4];
 struct Collector { pages: Vec<Page>, word_start: bool }
 
 impl OutputDev for Collector {
-    fn begin_page(&mut self, _n: u32, _media: &MediaBox, _art: Option<(f64, f64, f64, f64)>) -> Result<(), OutputError> { self.pages.push(Page::default()); Ok(()) }
+    fn begin_page(&mut self, _n: u32, media: &MediaBox, _art: Option<(f64, f64, f64, f64)>) -> Result<(), OutputError> {
+        self.pages.push(Page { area: ((media.urx - media.llx) * (media.ury - media.lly)).abs(), ..Default::default() });
+        Ok(())
+    }
     fn end_page(&mut self) -> Result<(), OutputError> { Ok(()) }
     fn output_character(&mut self, trm: &Transform, width: f64, spacing: f64, font_size: f64, text: &str) -> Result<(), OutputError> {
         // The size of a square with the area the font size takes on the page.
@@ -65,7 +68,7 @@ enum Piece { Line((f64, f64), (f64, f64)), Rect([(f64, f64); 4]) }
 
 /// The ruling lines a page paints: every stroke and fill, in page space,
 /// through `cm` and the form XObjects it draws.
-struct Rules<'a> { pdf: &'a lopdf::Document, horizontal: Vec<Segment>, vertical: Vec<Segment>, areas: Vec<Area> }
+struct Rules<'a> { pdf: &'a lopdf::Document, horizontal: Vec<Segment>, vertical: Vec<Segment>, areas: Vec<Area>, image_area: f64 }
 
 impl<'a> Rules<'a> {
     fn line(&mut self, (x0, y0): (f64, f64), (x1, y1): (f64, f64)) {
@@ -90,11 +93,10 @@ impl<'a> Rules<'a> {
             }
         }
     }
-    fn form(&self, resources: Option<&'a Dictionary>, name: &[u8]) -> Option<&'a lopdf::Stream> {
+    fn xobject(&self, resources: Option<&'a Dictionary>, name: &[u8]) -> Option<&'a lopdf::Stream> {
         let pdf: &'a lopdf::Document = self.pdf;
         let xobjects = resources?.get(b"XObject").ok().and_then(|x| pdf.dereference(x).ok())?.1.as_dict().ok()?;
-        let stream = pdf.dereference(xobjects.get(name).ok()?).ok()?.1.as_stream().ok()?;
-        (stream.dict.get(b"Subtype").and_then(|s| s.as_name()).ok() == Some(b"Form".as_slice())).then_some(stream)
+        pdf.dereference(xobjects.get(name).ok()?).ok()?.1.as_stream().ok()
     }
     fn walk(&mut self, content: &[u8], resources: Option<&'a Dictionary>, start: Matrix, depth: u8) {
         let Ok(content) = Content::decode(content) else { return };
@@ -125,7 +127,12 @@ impl<'a> Rules<'a> {
                 "n" => pieces.clear(),
                 "Do" if depth < 8 => {
                     let Some(name) = op.operands.first().and_then(|o| o.as_name().ok()) else { continue };
-                    let Some(stream) = self.form(resources, name) else { continue };
+                    let Some(stream) = self.xobject(resources, name) else { continue };
+                    let subtype = stream.dict.get(b"Subtype").and_then(|s| s.as_name()).ok();
+                    // An image fills the unit square: its area on the page is the
+                    // matrix's determinant. A scanned page is mostly one image.
+                    if subtype == Some(b"Image".as_slice()) { self.image_area += (ctm[0] * ctm[3] - ctm[1] * ctm[2]).abs(); continue }
+                    if subtype != Some(b"Form".as_slice()) { continue }
                     let matrix = stream.dict.get(b"Matrix").and_then(|m| m.as_array()).ok().filter(|m| m.len() == 6)
                         .map(|m| [number(&m[0]), number(&m[1]), number(&m[2]), number(&m[3]), number(&m[4]), number(&m[5])]).unwrap_or(IDENTITY);
                     let pdf: &'a lopdf::Document = self.pdf;
@@ -139,12 +146,15 @@ impl<'a> Rules<'a> {
     }
 }
 
-fn rules(pdf: &lopdf::Document, page: lopdf::ObjectId) -> (Vec<Segment>, Vec<Segment>, Vec<Area>) {
-    let mut rules = Rules { pdf, horizontal: Vec::new(), vertical: Vec::new(), areas: Vec::new() };
-    let Ok(content) = pdf.get_page_content(page) else { return Default::default() };
-    let resources = pdf.get_page_resources(page).ok().and_then(|(own, _)| own);
+/// What a page draws besides its text: ruling lines, filled areas, images.
+fn draw(pdf: &lopdf::Document, id: lopdf::ObjectId, page: &mut Page) {
+    let mut rules = Rules { pdf, horizontal: Vec::new(), vertical: Vec::new(), areas: Vec::new(), image_area: 0.0 };
+    let Ok(content) = pdf.get_page_content(id) else { return };
+    // A page's resources are its own dictionary or one it refers to (also
+    // inherited from its parents).
+    let resources = pdf.get_page_resources(id).ok().and_then(|(own, refs)| own.or_else(|| refs.iter().find_map(|r| pdf.get_dictionary(*r).ok())));
     rules.walk(&content, resources, IDENTITY, 0);
-    (rules.horizontal, rules.vertical, rules.areas)
+    (page.horizontal, page.vertical, page.areas, page.image_area) = (rules.horizontal, rules.vertical, rules.areas, rules.image_area);
 }
 
 /// Points within which two lines are the same line (a border drawn twice,
@@ -309,8 +319,15 @@ fn line_keys(page: &Page, keep: impl Fn((usize, &Glyph)) -> bool) -> std::collec
     }).filter(|(_, t)| !t.is_empty()).collect()
 }
 
-/// Below this many characters per page on average, the pages are images.
-const SCANNED_CHARS_PER_PAGE: usize = 40;
+/// "la página 3", "las páginas 1–4, 7".
+fn pages_list(pages: &[u32]) -> String {
+    let mut runs: Vec<(u32, u32)> = Vec::new();
+    for &p in pages {
+        match runs.last_mut() { Some(r) if r.1 + 1 == p => r.1 = p, _ => runs.push((p, p)) }
+    }
+    let text = runs.iter().map(|&(a, b)| if a == b { a.to_string() } else { format!("{a}–{b}") }).collect::<Vec<_>>().join(", ");
+    if pages.len() == 1 { format!("la página {text}") } else { format!("las páginas {text}") }
+}
 
 pub fn extract(bytes: &[u8]) -> Result<Document, String> {
     let mut pdf = pdf_extract::Document::load_mem(bytes).map_err(|e| format!("PDF ilegible: {e}"))?;
@@ -329,8 +346,7 @@ pub fn extract(bytes: &[u8]) -> Result<Document, String> {
             collector.pages.push(Page::default());
             unreadable.push(*n);
         }
-        let (horizontal, vertical, areas) = rules(&pdf, page_ids[n]);
-        if let Some(page) = collector.pages.last_mut() { page.horizontal = horizontal; page.vertical = vertical; page.areas = areas; }
+        if let Some(page) = collector.pages.last_mut() { draw(&pdf, page_ids[n], page) }
     }
     if !unreadable.is_empty() { doc.notes.push(format!("Páginas que no se pudieron leer: {unreadable:?}.")) }
 
@@ -369,15 +385,36 @@ pub fn extract(bytes: &[u8]) -> Result<Document, String> {
         pages_text.push(page_text(page, &table_of));
     }
 
-    let chars: usize = pages_text.iter().map(|p| p.trim().chars().count()).sum();
-    if chars < SCANNED_CHARS_PER_PAGE * pages_text.len() {
-        doc.notes.push("El PDF casi no tiene texto (probablemente escaneado). DocPack no hace OCR: lee las imágenes de paginas/.".into());
+    // A page that is mostly a picture (a scan, a photo of a page) is read by
+    // OCR; its text replaces the page's own only when OCR finds more letters.
+    let letters = |t: &str| t.chars().filter(|c| c.is_alphanumeric()).count();
+    let pictures: Vec<u32> = collector.pages.iter().enumerate().filter(|(_, p)| p.area > 0.0 && p.image_area >= p.area / 2.0).map(|(i, _)| i as u32 + 1).collect();
+    let mut by_ocr = std::collections::HashSet::new();
+    if !pictures.is_empty() {
+        match crate::render::ocr(bytes, &pictures) {
+            Ok(ocr) => {
+                for (n, text) in ocr.pages {
+                    let i = (n - 1) as usize;
+                    if letters(&text) > letters(&pages_text[i]) { pages_text[i] = text; by_ocr.insert(n); }
+                }
+                if !by_ocr.is_empty() {
+                    let mut used: Vec<u32> = by_ocr.iter().copied().collect();
+                    used.sort();
+                    doc.notes.push(format!("Texto de {} leído con {} sobre la imagen de la página: puede tener errores de reconocimiento.", pages_list(&used), ocr.engine));
+                    doc.ocr = Some(ocr.engine);
+                }
+            }
+            Err(e) => doc.notes.push(format!("No se pudo leer el texto de {}, que {} ({e}): mira paginas/.", pages_list(&pictures), if pictures.len() == 1 { "es una imagen" } else { "son imágenes" })),
+        }
     }
     if !doc.tables.is_empty() {
         doc.notes.push("Tablas detectadas por sus bordes dibujados; una tabla sin bordes queda como texto en su sección.".into());
     }
     let text_of = |from: u32, to: u32| -> String {
-        (from..=to).map(|p| format!("<!-- página {p} -->\n{}\n", pages_text[(p - 1) as usize].trim())).collect::<Vec<_>>().join("\n")
+        (from..=to).map(|p| {
+            let how = if by_ocr.contains(&p) { " · texto por OCR" } else { "" };
+            format!("<!-- página {p}{how} -->\n{}\n", pages_text[(p - 1) as usize].trim())
+        }).collect::<Vec<_>>().join("\n")
     };
     // Bookmarks: (page, title), levels 1-2, merged when several start on one page.
     let mut marks: Vec<(u32, String, u8)> = Vec::new();
