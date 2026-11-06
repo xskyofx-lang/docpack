@@ -23,7 +23,7 @@ jobs:
         run: |
           cargo build --release --locked --manifest-path engine/Cargo.toml
           os=$([ "$(uname -s)" = Darwin ] && echo macos || echo linux)
-          arch=$(case "$(uname -m)" in arm64|aarch64) echo arm64;; *) echo x64;; esac)
+          if [ "$(uname -m)" = arm64 ] || [ "$(uname -m)" = aarch64 ]; then arch=arm64; else arch=x64; fi
           mkdir -p "plugins/claude-code/native/$os-$arch"
           cp engine/target/release/docpack "plugins/claude-code/native/$os-$arch/docpack"
           version=$(sed -n 's/.*"version": "\(.*\)".*/\1/p' plugins/claude-code/.claude-plugin/plugin.json)
