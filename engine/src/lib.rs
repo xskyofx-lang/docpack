@@ -11,6 +11,7 @@ use std::path::{Path, PathBuf};
 
 mod docx;
 mod ooxml;
+mod paginate;
 mod pdf;
 mod pptx;
 mod render;
@@ -36,6 +37,8 @@ pub struct Section {
     pub figures: Vec<usize>,
     /// Titles of the headings above this one that had no content of their own.
     pub path: Vec<String>,
+    /// Text repeated on every page (headers and footers): no page of its own.
+    pub every_page: bool,
 }
 
 /// A table, written as CSV once.
@@ -69,7 +72,8 @@ pub struct Document {
 
 #[derive(Debug, Clone, Default)]
 pub struct Options {
-    /// Render PDF pages to PNG (Windows only).
+    /// Page numbers and page images: render PDF pages to PNG and lay a Word
+    /// document out with an engine of this machine to know its pages.
     pub pages: bool,
     /// Rebuild even when the pack is current.
     pub force: bool,
@@ -243,8 +247,21 @@ pub fn build(source: &Path, project: &Path, options: &Options) -> Result<Built, 
         }
     }
     let mut doc = extract(&bytes, &ext)?;
+    // The PDF whose pages are the document's pages: the file itself, or Word
+    // laid out by an engine of this machine (paginate.rs).
+    let mut laid: Option<Vec<u8>> = None;
+    if matches!(ext.as_str(), "docx" | "docm") && options.pages {
+        match paginate::layout(&bytes, &ext) {
+            Ok(l) => { paginate::assign_pages(&mut doc, &l); laid = Some(l.pdf) }
+            Err(e) => {
+                doc.notes.retain(|n| !n.starts_with("Word no guarda páginas"));
+                doc.notes.push(format!("Sin números de página: Word no guarda páginas y ningún motor de este equipo pudo paginarlo ({e}). Las referencias son por sección y línea."));
+            }
+        }
+    }
     fold_empty_headings(&mut doc);
-    write_pack(&dir, source, &bytes, &sha, &ext, doc, options)
+    let pages_pdf = if ext == "pdf" { Some(bytes.as_slice()) } else { laid.as_deref() };
+    write_pack(&dir, source, &bytes, &sha, doc, options, pages_pdf)
 }
 
 /// A heading with nothing under it but another heading (a title, then a
@@ -271,7 +288,7 @@ fn fold_empty_headings(doc: &mut Document) {
     doc.sections = out;
 }
 
-fn write_pack(dir: &Path, source: &Path, bytes: &[u8], sha: &str, ext: &str, mut doc: Document, options: &Options) -> Result<Built, String> {
+fn write_pack(dir: &Path, source: &Path, bytes: &[u8], sha: &str, mut doc: Document, options: &Options, pages_pdf: Option<&[u8]>) -> Result<Built, String> {
     let io = |e: std::io::Error| e.to_string();
     let parent = dir.parent().ok_or("Carpeta de pack inválida")?;
     std::fs::create_dir_all(parent).map_err(io)?;
@@ -326,8 +343,8 @@ fn write_pack(dir: &Path, source: &Path, bytes: &[u8], sha: &str, ext: &str, mut
     total += table_entries.iter().map(|t| t["tokens_estimate"].as_u64().unwrap_or(0)).sum::<u64>();
 
     let mut page_images = Vec::new();
-    if ext == "pdf" && options.pages {
-        match render::pdf_pages(bytes, &staging.join("paginas")) {
+    if let (Some(pdf), true) = (pages_pdf, options.pages) {
+        match render::pdf_pages(pdf, &staging.join("paginas")) {
             Ok(files) => page_images = files,
             Err(e) => doc.notes.push(format!("Imágenes de página no generadas: {e}")),
         }

@@ -209,7 +209,7 @@ pub fn extract(bytes: &[u8]) -> Result<Document, String> {
             if !text.trim().is_empty() && !extra.contains(text.trim()) { extra.push_str(text.trim()); extra.push('\n'); }
         }
     }
-    if !extra.is_empty() { sections.push(Section { title: "Encabezados y pies de página".into(), level: 1, text: extra, ..Default::default() }); }
+    if !extra.is_empty() { sections.push(Section { title: "Encabezados y pies de página".into(), level: 1, text: extra, every_page: true, ..Default::default() }); }
     // Header and footer images are logos repeated on every page: counted, not
     // exported, so the figures are the document's own (falla 8).
     let header_images = ooxml::names(&zip).iter().filter(|n| n.starts_with("word/_rels/header") || n.starts_with("word/_rels/footer"))
