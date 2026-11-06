@@ -1,5 +1,11 @@
 # Cambios
 
+## 0.3.1
+
+- Un pack armado sin páginas (por ejemplo, una vista previa rápida) se vuelve a
+  armar cuando se piden páginas; antes se reutilizaba y las páginas nunca
+  llegaban. El manifiesto guarda con qué opciones se armó.
+
 ## 0.3.0
 
 - Páginas en Word: con Microsoft Word o LibreOffice instalados, cada sección

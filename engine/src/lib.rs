@@ -216,11 +216,14 @@ pub fn extract(bytes: &[u8], ext: &str) -> Result<Document, String> {
     }
 }
 
-/// The pack's manifest when it is current for these bytes.
-fn current(dir: &Path, sha: &str) -> Option<serde_json::Value> {
+/// The pack's manifest when it is current for these bytes and has what is
+/// asked: a pack built without pages (a quick preview) is rebuilt when pages
+/// are wanted, so they are never missing for good.
+fn current(dir: &Path, sha: &str, options: &Options) -> Option<serde_json::Value> {
     let text = std::fs::read_to_string(dir.join("manifest.json")).ok()?;
     let manifest: serde_json::Value = serde_json::from_str(&text).ok()?;
-    (manifest["source"]["sha256"] == sha && manifest["docpack_version"] == VERSION).then_some(manifest)
+    let has_pages = manifest["options"]["pages"].as_bool().unwrap_or(false);
+    (manifest["source"]["sha256"] == sha && manifest["docpack_version"] == VERSION && (has_pages || !options.pages)).then_some(manifest)
 }
 
 fn csv_cell(value: &str) -> String {
@@ -238,7 +241,7 @@ pub fn build(source: &Path, project: &Path, options: &Options) -> Result<Built, 
     let sha = sha256(&bytes);
     let dir = pack_dir(project, source);
     if !options.force {
-        if let Some(m) = current(&dir, &sha) {
+        if let Some(m) = current(&dir, &sha, options) {
             return Ok(Built {
                 index: dir.join("index.json"), pack: dir, status: "up_to_date",
                 sections: m["stats"]["sections"].as_u64().unwrap_or(0) as usize,
@@ -366,6 +369,7 @@ fn write_pack(dir: &Path, source: &Path, bytes: &[u8], sha: &str, mut doc: Docum
         "docpack_version": VERSION,
         "source": {"file": source.to_string_lossy(), "name": file_name, "sha256": sha, "bytes": bytes.len(), "kind": doc.kind, "pages": doc.pages},
         "extractor": {"name": "docpack", "version": VERSION, "ocr": doc.ocr},
+        "options": {"pages": options.pages},
         "stats": {"sections": section_entries.len(), "tables": table_entries.len(), "figures": figure_entries.len(), "page_images": page_images.len(), "tokens_total_estimate": total},
         "notes": doc.notes,
         "original_unchanged": true,

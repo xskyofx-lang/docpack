@@ -1,7 +1,7 @@
 {
   "name": "docpack",
   "displayName": "DocPack",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "Converts PDF, DOCX, XLSX and PPTX into a local pack (index, sections, CSV tables, page images) so Claude reads only the parts it needs instead of the whole document.",
   "author": {
     "name": "Juan Antonio Sandoval Puente",

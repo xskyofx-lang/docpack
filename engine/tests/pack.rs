@@ -52,3 +52,19 @@ fn a_folder_that_is_not_a_pack_is_never_overwritten() {
     assert!(build(&src, t.path(), &Options::default()).is_err());
     assert_eq!(std::fs::read_to_string(foreign.join("mio.txt")).unwrap(), "no tocar");
 }
+
+/// A quick pack without pages (an attachment preview) is not reused when pages
+/// are asked for later; a pack with pages serves a request without them.
+#[test]
+fn a_pack_without_pages_is_rebuilt_when_pages_are_asked() {
+    let t = tempfile::tempdir().unwrap();
+    let src = t.path().join("diseno.pdf");
+    std::fs::copy(fixture("diseno.pdf"), &src).unwrap();
+    let quick = Options { pages: false, force: false };
+    let full = Options { pages: true, force: false };
+    assert_eq!(build(&src, t.path(), &quick).unwrap().status, "built");
+    assert_eq!(build(&src, t.path(), &quick).unwrap().status, "up_to_date");
+    assert_eq!(build(&src, t.path(), &full).unwrap().status, "built", "pages were missing");
+    assert_eq!(build(&src, t.path(), &full).unwrap().status, "up_to_date");
+    assert_eq!(build(&src, t.path(), &quick).unwrap().status, "up_to_date", "a pack with pages also serves a quick read");
+}
