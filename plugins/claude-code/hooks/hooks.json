@@ -6,7 +6,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/bin/docpack.exe",
+            "command": "${CLAUDE_PLUGIN_ROOT}/bin/docpack",
             "args": ["hook", "claude-code"],
             "timeout": 300
           }

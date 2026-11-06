@@ -93,10 +93,11 @@ claude plugin install docpack@docpack
 Eso es todo. No hay que instalar Python, ni Rust, ni nada más: el plugin trae
 el ejecutable de DocPack ya compilado.
 
-**Sistema:** por ahora el ejecutable incluido es para **Windows**. En Linux o
-macOS se puede compilar el motor (ver [Compilar](#compilar-desde-el-código)),
-pero el plugin todavía no trae esa versión, y las imágenes de página de los PDF
-solo se generan en Windows.
+**Sistemas:** Windows (x64), Linux (x64 y ARM64) y macOS (Apple Silicon e
+Intel). El plugin trae el ejecutable de cada uno y elige solo el que toca. La
+única diferencia: las imágenes de página de los PDF (`paginas/`) por ahora se
+generan solo en Windows; en Linux y macOS el texto, las secciones y las tablas
+salen igual, y el pack avisa en `manifest.json` que no hay imágenes.
 
 ## Cómo usarlo sin gastar tokens de más
 
@@ -221,10 +222,12 @@ engine/                 el motor: biblioteca y comando docpack (Rust)
   src/lib.rs            convierte y arma el pack, sin saber nada de ningún agente
   src/claude_code.rs    el único archivo que conoce el protocolo de Claude Code
 plugins/
-  claude-code/          el plugin de Claude Code (hook, skill y ejecutable)
+  claude-code/          el plugin de Claude Code: hook, skill, bin/ (lanzador y
+                        ejecutable de Windows) y native/ (Linux y macOS)
   codex/                reservado para un plugin de Codex
 docs/                   formato del pack y cómo conectar otro agente
-scripts/                compilar y empaquetar
+scripts/                compilar y empaquetar en local
+.github/workflows/      pruebas y binarios para los tres sistemas
 ```
 
 El motor no depende de Claude. Un plugin para otro agente, Codex por ejemplo,
@@ -239,12 +242,19 @@ Hace falta [Rust](https://rustup.rs) 1.80 o más nuevo.
 cargo build --release --manifest-path engine/Cargo.toml
 ```
 
-Para preparar el plugin de Claude Code en Windows (pruebas, compilación, copia
-del ejecutable y verificación de que las versiones coinciden):
+Para probar el plugin en tu Windows con lo que acabas de compilar (pruebas,
+compilación, copia del ejecutable y verificación de que las versiones
+coinciden):
 
 ```bash
 powershell -ExecutionPolicy Bypass -File scripts/build-claude-plugin.ps1
 ```
+
+Los ejecutables que se publican no salen de la máquina de nadie: los compila
+GitHub Actions en Windows, Linux y macOS (workflow **Binarios**), comprueba que
+cada uno responde con la versión del plugin y los deja en
+`plugins/claude-code/` en un commit. Las pruebas corren en los tres sistemas
+con cada cambio (workflow **Pruebas**).
 
 ## Licencia
 

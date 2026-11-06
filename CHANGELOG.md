@@ -9,6 +9,9 @@
   `docs/integrar-otro-agente.md`.
 - `scripts/build-claude-plugin.ps1` prueba, compila, copia el ejecutable al
   plugin y se detiene si la versión del motor y la del plugin no coinciden.
+- Windows, Linux (x64 y ARM64) y macOS (Apple Silicon e Intel): un lanzador
+  `bin/docpack` elige el ejecutable del sistema; los binarios los compila
+  GitHub Actions y las pruebas corren en los tres sistemas.
 - La conversión no cambia respecto a 0.1.3; los packs se regeneran una vez
   porque cambió la versión.
 

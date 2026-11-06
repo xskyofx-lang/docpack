@@ -1,0 +1,30 @@
+name: Pruebas
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  pruebas:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Pruebas del motor
+        run: cargo test --locked --manifest-path engine/Cargo.toml
+      - name: Lanzador
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          cargo build --release --locked --manifest-path engine/Cargo.toml
+          os=$([ "$(uname -s)" = Darwin ] && echo macos || echo linux)
+          arch=$(case "$(uname -m)" in arm64|aarch64) echo arm64;; *) echo x64;; esac)
+          mkdir -p "plugins/claude-code/native/$os-$arch"
+          cp engine/target/release/docpack "plugins/claude-code/native/$os-$arch/docpack"
+          version=$(sed -n 's/.*"version": "\(.*\)".*/\1/p' plugins/claude-code/.claude-plugin/plugin.json)
+          test "$(plugins/claude-code/bin/docpack --version)" = "docpack $version"

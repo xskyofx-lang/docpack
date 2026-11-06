@@ -1,0 +1,72 @@
+# Compila DocPack para cada sistema y deja los ejecutables dentro del plugin
+# de Claude Code, en un commit sobre la rama desde la que se lanzó.
+# Se lanza a mano (Actions → Binarios → Run workflow) después de subir la
+# versión en engine/Cargo.toml y en plugin.json.
+name: Binarios
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  compilar:
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - { os: windows-latest,   target: x86_64-pc-windows-msvc,     dest: bin/docpack.exe,               runs: true }
+          - { os: ubuntu-latest,    target: x86_64-unknown-linux-musl,  dest: native/linux-x64/docpack,      runs: true }
+          - { os: ubuntu-24.04-arm, target: aarch64-unknown-linux-musl, dest: native/linux-arm64/docpack,    runs: true }
+          - { os: macos-latest,     target: aarch64-apple-darwin,       dest: native/macos-arm64/docpack,    runs: true }
+          - { os: macos-latest,     target: x86_64-apple-darwin,        dest: native/macos-x64/docpack,      runs: false }
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - name: Herramientas musl
+        if: contains(matrix.target, 'musl')
+        run: sudo apt-get update && sudo apt-get install -y musl-tools
+      - name: Compilar
+        run: cargo build --release --locked --manifest-path engine/Cargo.toml --target ${{ matrix.target }}
+      - name: Preparar
+        shell: bash
+        run: |
+          ext=$([ "${{ runner.os }}" = Windows ] && echo .exe || true)
+          mkdir -p "out/$(dirname '${{ matrix.dest }}')"
+          cp "engine/target/${{ matrix.target }}/release/docpack$ext" "out/${{ matrix.dest }}"
+          version=$(sed -n 's/.*"version": "\(.*\)".*/\1/p' plugins/claude-code/.claude-plugin/plugin.json)
+          if [ "${{ matrix.runs }}" = true ]; then
+            test "$("out/${{ matrix.dest }}" --version | tr -d '\r')" = "docpack $version"
+          fi
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.target }}
+          path: out/
+
+  empaquetar:
+    needs: compilar
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: artefactos
+      - name: Copiar al plugin
+        run: |
+          for d in artefactos/*/; do cp -R "$d". plugins/claude-code/; done
+          chmod +x plugins/claude-code/native/*/docpack plugins/claude-code/bin/docpack
+          test "$(plugins/claude-code/bin/docpack --version)" = "docpack $(sed -n 's/.*"version": "\(.*\)".*/\1/p' plugins/claude-code/.claude-plugin/plugin.json)"
+          (cd plugins/claude-code && sha256sum bin/docpack.exe native/*/docpack)
+      - name: Commit
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add plugins/claude-code/bin plugins/claude-code/native
+          git update-index --chmod=+x plugins/claude-code/native/*/docpack
+          if git diff --cached --quiet; then echo "Sin cambios"; exit 0; fi
+          git commit -m "Binarios $(sed -n 's/.*"version": "\(.*\)".*/\1/p' plugins/claude-code/.claude-plugin/plugin.json) para Windows, Linux y macOS"
+          git push

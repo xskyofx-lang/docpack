@@ -2,3 +2,4 @@
 *.exe binary
 *.pdf binary
 *.png binary
+plugins/claude-code/bin/docpack text eol=lf

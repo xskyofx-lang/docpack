@@ -1,0 +1,23 @@
+#!/bin/sh
+# Ejecuta el DocPack de este sistema. En Windows el hook y PowerShell llegan
+# directo a docpack.exe; este lanzador cubre Linux, macOS y Git Bash.
+# Sale con 1 (nunca 2) si no hay ejecutable: para Claude Code eso es un error
+# que no bloquea, y la lectura sigue normal.
+root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+case "$(uname -s)" in
+  Linux) os=linux ;;
+  Darwin) os=macos ;;
+  MINGW*|MSYS*|CYGWIN*) exec "$root/bin/docpack.exe" "$@" ;;
+  *) echo "docpack: sistema no soportado: $(uname -s)" >&2; exit 1 ;;
+esac
+case "$(uname -m)" in
+  x86_64|amd64) arch=x64 ;;
+  arm64|aarch64) arch=arm64 ;;
+  *) echo "docpack: arquitectura no soportada: $(uname -m)" >&2; exit 1 ;;
+esac
+bin="$root/native/$os-$arch/docpack"
+if [ ! -x "$bin" ]; then
+  echo "docpack: falta el ejecutable para $os-$arch en $bin" >&2
+  exit 1
+fi
+exec "$bin" "$@"
