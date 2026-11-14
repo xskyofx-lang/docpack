@@ -1,6 +1,6 @@
 [package]
 name = "docpack"
-version = "0.4.1"
+version = "0.4.2"
 edition = "2021"
 authors = ["Juan Antonio Sandoval Puente"]
 homepage = "https://skyoflies.com"
@@ -47,9 +47,11 @@ objc2-core-graphics = { version = "0.3", default-features = false, features = ["
 objc2-image-io = { version = "0.3", default-features = false, features = ["std", "CGImageDestination", "objc2-core-graphics"] }
 objc2-vision = { version = "0.3", default-features = false, features = ["std", "VNObservation", "VNRecognizeTextRequest", "VNRequest", "VNRequestHandler", "VNTypes", "objc2-core-foundation", "objc2-core-graphics"] }
 
-# pdf-extract 0.12.1 (the latest) reads the `c_first c_last w` form of a CID
-# font's widths (/W) wrong: every glyph in such a range gets the default width,
-# 0 in many fonts, so the letters after it are placed on top of it. Its source
-# is in vendor/pdf-extract with that one function fixed.
+# pdf-extract 0.12.1 (the latest) is in vendor/pdf-extract with two changes:
+# - it read the `c_first c_last w` form of a CID font's widths (/W) wrong:
+#   every glyph in such a range got the default width, 0 in many fonts, so
+#   the letters after it were placed on top of it;
+# - `g`, `rg` and `k` now set the fill color, and the output is told the
+#   color each piece of text is painted with (`OutputDev::text_color`).
 [patch.crates-io]
 pdf-extract = { path = "vendor/pdf-extract" }

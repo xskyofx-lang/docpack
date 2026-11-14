@@ -15,7 +15,10 @@ version and date.
 1. **Never read the original document**: not with Read, not with `cat`, not
    with a Python or shell script that opens the PDF, DOCX or XLSX. Read the pack:
    - `index.json` first: sections (with pages and an estimated token count),
-     tables and page images. A section with `"kind": "toc"` is a table of
+     tables and page images. In a long document the index keeps only what
+     picks a section (`table_count`, `part_count`) and `section_detail` names
+     `secciones/index.json`, where each section's `parts`, `outline`, tables
+     and figures are: look up only the section you chose. A section with `"kind": "toc"` is a table of
      contents: it says where things are, not what they say.
    - Then only the `secciones/*.md` the question needs, and of them only the
      tables (`tablas/Tnn.csv`) and figures they reference. `tablas/index.json`
@@ -31,6 +34,20 @@ version and date.
      a search for its heading.
    - A table marked `"read"` in `tablas/index.json` is data (thousands of
      rows): filter or summarize its CSV with a script; do not read it whole.
+   - **Colors.** When the document marks things with color (an item in red
+     that does not apply, a gray row not delivered yet, "test only the pink
+     ones"), `manifest.json` → `colores` is its legend: each color with its
+     name (rojo, rosa, morado, gris…), hex value, use (texto, fondo,
+     resaltado), count and examples; `index.json` → `colores` lists them in
+     short. A table with colors names `colores_file` in `tablas/index.json`:
+     `tablas/Tnn.colores.json` gives, per cell (`fila`, `columna` as in the
+     CSV, header row 0), its `fondo` and the pieces of its text in a color of
+     their own. The CSV keeps the plain text. In a section, marked text is
+     `<span style="color:#RRGGBB">` or `<mark style="background:#RRGGBB">`.
+     To answer "which are pink", filter the cells of `Tnn.colores.json` by
+     the color the legend names; never guess a color from the words. Text all
+     in one color on its line in a PDF (a heading, a caption) is the
+     document's style and is not marked.
    - `paginas/pNNN.png` only when you must see a figure or a layout.
 2. **To look at given pages, use the pack**:
    ```bash
@@ -45,6 +62,13 @@ version and date.
    docpack find "clearing cycle 6" --project "<project folder>"
    ```
    Each hit names its pack, section (or table and row), part, page and line.
+   Hits come ranked: the words as written first, then a table's title, a
+   heading, body text and a table's row; a table of contents last. A line
+   repeated word for word in a pack (a running header) is one hit with
+   `count`. Narrow it with `--pack <name>`, `--in tablas` or `--in texto`,
+   and `--color rosa` (or `--color FF69B4`) for only what the document marks
+   in that color; with `--color` the text may be left out
+   (`docpack find --color rosa`) and each hit lists the colored cells.
 4. **To compare two versions** of a document:
    ```bash
    docpack diff "<old document or pack>" "<new document or pack>" --project "<project folder>"
@@ -89,10 +113,13 @@ get no pack and are read as they are.
 ```
 docpack/index.json                every pack: title, version, date, size
 docpack/<file name>/
-  manifest.json   source file, SHA-256, document title/version/date, stats, notes
+  manifest.json   source file, SHA-256, document title/version/date, stats, notes,
+                  colores (the legend of the colors the document marks with)
   index.json      sections (lines, parts, tables, figures) — read this first
-  secciones/      01-<title>.md …   (tables and figures are referenced, not repeated)
-  tablas/         T01.csv …, index.json (title, header, pages)
+  secciones/      01-<title>.md …   (tables and figures are referenced, not repeated);
+                  index.json with each section's detail in a long document
+  tablas/         T01.csv …, index.json (title, header, pages, colors);
+                  Tnn.colores.json (each cell's fill and colored text)
   figuras/        F01.png …, index.json   (images embedded in Word)
   paginas/        p001.png …        (page images: all, or only the pages to check)
 ```

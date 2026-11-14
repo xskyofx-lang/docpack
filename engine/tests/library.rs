@@ -150,3 +150,39 @@ fn the_text_of_some_pages() {
     assert_eq!(library::parse_pages("4-5,9").unwrap(), [4, 5, 9]);
     assert!(library::parse_pages("5-4").is_err());
 }
+
+#[test]
+fn find_filters_by_pack_by_kind_and_by_color() {
+    let t = project();
+    std::fs::copy(fixture("colores.pdf"), t.path().join("colores.pdf")).unwrap();
+    build(&t.path().join("colores.pdf"), t.path(), &QUICK).unwrap();
+    let root = t.path().join("docpack");
+    let find = |query: &str, opts: library::Find| library::find_with(&root, query, &library::Find { limit: 50, ..opts });
+    // "Only the pink ones": the cells in pink, with the pieces in pink, and nothing else.
+    let pink = find("", library::Find { color: Some("rosa".into()), ..Default::default() });
+    let hits = pink["hits"].as_array().unwrap();
+    assert_eq!(hits.len(), 1, "{pink}");
+    assert_eq!((hits[0]["table"].as_str(), hits[0]["row"].as_u64(), hits[0]["colores"][0]["texto"][0].as_str()), (Some("T01"), Some(3), Some("Pendiente")));
+    // Red: the IRDs in the table and the word in the text; by value as well as by name.
+    let red = find("", library::Find { color: Some("FF0000".into()), ..Default::default() });
+    let red: Vec<&Value> = red["hits"].as_array().unwrap().iter().collect();
+    assert!(red.iter().any(|h| h["table"] == "T01" && h["colores"][0]["texto"][0].as_str().unwrap().starts_with("20, MS")), "{red:?}");
+    assert!(red.iter().any(|h| h["section"].is_string() && h["text"].as_str().unwrap().contains("Las IRD en rojo")), "the text without its tags: {red:?}");
+    // Only tables, only one pack.
+    let only = find("MCI", library::Find { only: Some("tablas".into()), pack: Some("colores".into()), ..Default::default() });
+    assert!(only["hits"].as_array().unwrap().iter().all(|h| h["pack"] == "colores.pdf" && h["table"].is_string()), "{only}");
+    assert!(find("MCI", library::Find { only: Some("texto".into()), ..Default::default() })["total"] == 0, "MCI is only in a table");
+}
+
+#[test]
+fn find_names_a_table_by_its_title_and_counts_a_repeated_line_once() {
+    let t = project();
+    let root = t.path().join("docpack");
+    let found = library::find(&root, "registro de detalle", 50);
+    let first = &found["hits"][0];
+    assert!(first["table"].is_string() && first["row"].is_null(), "a table found by its title comes first: {found}");
+    // The running header of every page of a pack is one hit with its count.
+    let header = library::find(&root, "Guía de prueba", 50);
+    let in_sin_bordes: Vec<&Value> = header["hits"].as_array().unwrap().iter().filter(|h| h["pack"] == "sin_bordes.pdf").collect();
+    assert!(in_sin_bordes.len() <= 1, "{header}");
+}

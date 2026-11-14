@@ -1,5 +1,40 @@
 # Cambios
 
+## 0.4.2
+
+Medido sobre los mismos 44 documentos reales contra la 0.4.1.
+
+- Colores: cuando un documento marca cosas con color (una IRD en rojo que no
+  aplica, una fila gris que no entra en la primera entrega), el pack lo
+  conserva. `manifest.json` → `colores` es la leyenda (nombre en español,
+  valor, si es texto, fondo o resaltado, veces y ejemplos);
+  `tablas/Tnn.colores.json` da el fondo de cada celda y los pedazos de su
+  texto en otro color; el CSV no cambia; en las secciones el texto marcado va
+  como `<span style="color:#RRGGBB">`. En Word sale de la letra, su estilo o
+  el resaltado; en PDF, del color de cada letra y del relleno detrás de cada
+  celda. El color del cuerpo sale del documento y no se marca; tampoco una
+  línea toda de un color (un título), una viñeta suelta ni un hipervínculo.
+  En un diseño real: 670 IRD en rojo, las mismas en su Word y en su PDF.
+- `pdf-extract` (vendor/): los operadores de color `g`, `rg` y `k` ya fijan
+  el color de relleno, y el texto avisa con qué color se pinta.
+- `docpack find`: lo escrito tal cual primero y, dentro, el título de una
+  tabla, un subtítulo, el texto y la fila; el índice de contenido al final;
+  una línea repetida en cada página es un resultado con `count`. Filtros
+  `--pack`, `--in tablas|texto` y `--color rosa` (o `--color FF69B4`), que
+  puede ir sin texto.
+- Índice ligero: en un documento muy largo el índice se queda con lo que
+  elige una sección y el detalle va en `secciones/index.json` (guía de 2 409
+  páginas: 104 KB → 32 KB; los 44 documentos: −29 %).
+- Las letras que corren en otra dirección que su página (un pie de página de
+  lado) se leen aparte, en su dirección, en lugar de letra por letra.
+- Una viñeta o un guion pegado a su texto es sangría, no una columna: las
+  listas dentro de una celda ya no parten la tabla (encabezados vacíos
+  366 → 160; en el manual de 3 220 páginas, 182 → 49).
+- Muse: `plugins/muse/` instala DocPack en la máquina de Muse con un mensaje,
+  guarda su skill y revisa cada semana si hay versión nueva (compara con
+  `main` y muestra las mejoras de este CHANGELOG; nunca actualiza sin
+  permiso).
+
 ## 0.4.1
 
 Medido sobre 44 documentos reales contra la 0.4.0 (detalle en el README).

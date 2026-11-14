@@ -12,6 +12,13 @@ fn read_json(path: &Path) -> Option<Value> {
     serde_json::from_str(&std::fs::read_to_string(path).ok()?).ok()
 }
 
+/// A pack's sections with all their detail: from secciones/index.json when a
+/// long document keeps it there, else from its index.
+fn section_list(dir: &Path, index: &Value) -> Vec<Value> {
+    read_json(&dir.join("secciones").join("index.json")).and_then(|v| v.as_array().cloned())
+        .unwrap_or_else(|| index["sections"].as_array().cloned().unwrap_or_default())
+}
+
 /// Text compared without case, accents or repeated spaces.
 pub fn fold(text: &str) -> String {
     let mut out = String::with_capacity(text.len());
@@ -93,47 +100,130 @@ fn tokens(text: &str) -> Vec<&str> { text.split(|c: char| !c.is_alphanumeric()).
 /// first, then the rest; tables of contents last. The first `limit`, and how
 /// many there are.
 pub fn find(root: &Path, query: &str, limit: usize) -> Value {
+    find_with(root, query, &Find { limit, ..Default::default() })
+}
+
+/// What to search: how many hits to show, only packs whose name holds
+/// `pack`, only "tablas" or only "texto", only what is marked in `color` (a
+/// name such as "rosa" or a value such as "FF69B4").
+#[derive(Debug, Clone, Default)]
+pub struct Find { pub limit: usize, pub pack: Option<String>, pub only: Option<String>, pub color: Option<String> }
+
+/// Search every pack. Hits are ranked: the words as written before the words
+/// apart, and in each a table's title, then a heading, then body text, then a
+/// table's row; a table of contents last. A line repeated word for word in one pack (a running
+/// header) is one hit with its `count`. With `color`, only text or cells in
+/// that color, and the query may be empty.
+pub fn find_with(root: &Path, query: &str, opts: &Find) -> Value {
     let folded = fold(query);
     let words: Vec<String> = tokens(&folded).into_iter().map(str::to_string).collect();
     // 0: the query as written; 1: all its words; None: not a match.
     let rank = |text: &str| -> Option<u8> {
+        if words.is_empty() { return Some(1) }
         let t = fold(text);
         let have = tokens(&t);
-        let all = !words.is_empty() && words.iter().all(|w| have.iter().any(|h| if w.chars().all(|c| c.is_ascii_digit()) { h == w } else { h.starts_with(w.as_str()) }));
+        let all = words.iter().all(|w| have.iter().any(|h| if w.chars().all(|c| c.is_ascii_digit()) { h == w } else { h.starts_with(w.as_str()) }));
         all.then(|| if t.contains(&folded) { 0 } else { 1 })
     };
+    let wanted = |hex: &str| opts.color.as_deref().is_none_or(|c| {
+        let c = fold(c.trim_start_matches('#'));
+        fold(hex) == c || fold(crate::color::name(hex)) == c
+    });
     let snippet = |text: &str| text.split_whitespace().collect::<Vec<_>>().join(" ").chars().take(240).collect::<String>();
-    let mut hits: Vec<(u8, Value)> = Vec::new();
-    let mut add = |rank: u8, hit: Value| hits.push((rank, crate::compact(hit)));
-    for (dir, _) in packs(root) {
-        let Some(index) = read_json(&dir.join("index.json")) else { continue };
+    let (texts, tables) = (opts.only.as_deref() != Some("tablas"), opts.only.as_deref() != Some("texto"));
+    // (score, pack order, hit); a repeated line counts on its first hit.
+    let mut hits: Vec<(u8, usize, Value)> = Vec::new();
+    let mut seen: HashMap<(usize, String), usize> = HashMap::new();
+    let mut add = |score: u8, order: usize, key: String, hit: Value, hits: &mut Vec<(u8, usize, Value)>| {
+        if let Some(&at) = seen.get(&(order, key.clone())) {
+            let count = hits[at].2["count"].as_u64().unwrap_or(1) + 1;
+            hits[at].2["count"] = json!(count);
+            return;
+        }
+        seen.insert((order, key), hits.len());
+        hits.push((score, order, crate::compact(hit)));
+    };
+    for (order, (dir, _)) in packs(root).into_iter().enumerate() {
         let pack = name_of(&dir);
-        for section in index["sections"].as_array().into_iter().flatten() {
-            let Some(file) = section["file"].as_str() else { continue };
-            let Ok(body) = std::fs::read_to_string(dir.join(file)) else { continue };
-            let lines: Vec<&str> = body.lines().collect();
-            let contents = if section["kind"] == "toc" { 2 } else { 0 };
-            for (n, line) in lines.iter().enumerate() {
-                if line.starts_with("<!--") { continue }
-                let Some(r) = rank(line) else { continue };
-                let part = section["parts"].as_array().and_then(|parts| parts.iter().position(|p| p["lines"][0].as_u64().unwrap_or(0) <= n as u64 + 1 && p["lines"][1].as_u64().unwrap_or(0) >= n as u64 + 1)).map(|k| k + 1);
-                add(r + contents, json!({"pack": pack, "section": section["id"], "title": section["title"], "file": file, "line": n + 1, "part": part, "page": page_at(&lines, n, section["page_start"].as_u64()), "text": snippet(line)}));
+        if opts.pack.as_deref().is_some_and(|p| !fold(&pack).contains(&fold(p))) { continue }
+        let Some(index) = read_json(&dir.join("index.json")) else { continue };
+        if texts {
+            for section in section_list(&dir, &index).iter() {
+                let Some(file) = section["file"].as_str() else { continue };
+                let Ok(body) = std::fs::read_to_string(dir.join(file)) else { continue };
+                let lines: Vec<&str> = body.lines().collect();
+                let contents = section["kind"] == "toc";
+                for (n, line) in lines.iter().enumerate() {
+                    if line.starts_with("<!--") { continue }
+                    if opts.color.is_some() && !marked_colors(line).iter().any(|h| wanted(h)) { continue }
+                    let plain = crate::color::strip_tags(line);
+                    let Some(r) = rank(&plain) else { continue };
+                    let heading = plain.starts_with('#');
+                    let leaders = contents || plain.contains("....");
+                    let score = r * 4 + if heading { 1 } else { 2 } + if leaders { 8 } else { 0 };
+                    let part = section["parts"].as_array().and_then(|parts| parts.iter().position(|p| p["lines"][0].as_u64().unwrap_or(0) <= n as u64 + 1 && p["lines"][1].as_u64().unwrap_or(0) >= n as u64 + 1)).map(|k| k + 1);
+                    add(score, order, fold(&plain), json!({"pack": pack, "section": section["id"], "title": section["title"], "file": file, "line": n + 1, "part": part, "page": page_at(&lines, n, section["page_start"].as_u64()), "text": snippet(&plain)}), &mut hits);
+                }
             }
         }
-        for table in read_json(&dir.join("tablas").join("index.json")).as_ref().and_then(Value::as_array).into_iter().flatten() {
-            let Some(file) = table["file"].as_str() else { continue };
-            let Ok(text) = std::fs::read_to_string(dir.join(file)) else { continue };
-            for (r, row) in csv_rows(&text).iter().enumerate() {
-                let joined = row.join(" | ");
-                let Some(score) = rank(&joined) else { continue };
-                add(score, json!({"pack": pack, "table": table["id"], "title": table["title"], "file": file, "row": r + 1, "page": table["page"], "section": table["section"], "text": snippet(&joined)}));
+        if tables {
+            for table in read_json(&dir.join("tablas").join("index.json")).as_ref().and_then(Value::as_array).into_iter().flatten() {
+                let Some(file) = table["file"].as_str() else { continue };
+                let title = table["title"].as_str().unwrap_or("");
+                // Its title is where a table is found by name.
+                if opts.color.is_none() && !words.is_empty() {
+                    if let Some(r) = rank(title) {
+                        add(r * 4, order, format!("T:{}", table["id"]), json!({"pack": pack, "table": table["id"], "title": title, "file": file, "page": table["page"], "section": table["section"], "text": snippet(title)}), &mut hits);
+                    }
+                }
+                let Ok(text) = std::fs::read_to_string(dir.join(file)) else { continue };
+                let rows = csv_rows(&text);
+                // With a color: the cells in it, with the pieces in that color.
+                let colored: Option<Vec<Value>> = opts.color.as_ref().map(|_| table["colores_file"].as_str()
+                    .and_then(|f| read_json(&dir.join(f))).and_then(|v| v.as_array().cloned()).unwrap_or_default());
+                for (r, row) in rows.iter().enumerate() {
+                    let joined = row.join(" | ");
+                    let Some(score) = rank(&joined) else { continue };
+                    let mut hit = json!({"pack": pack, "table": table["id"], "title": title, "file": file, "row": r + 1, "page": table["page"], "section": table["section"], "text": snippet(&joined)});
+                    if let Some(cells) = &colored {
+                        let mut found = Vec::new();
+                        for c in cells.iter().filter(|c| c["fila"].as_u64() == Some(r as u64)) {
+                            let hex = |v: &Value| v.as_str().map(|s| s.split(' ').next().unwrap_or("").to_string());
+                            let fill = hex(&c["fondo"]).filter(|h| wanted(h));
+                            let pieces: Vec<String> = c["texto"].as_array().into_iter().flatten()
+                                .filter(|m| hex(&m["color"]).is_some_and(|h| wanted(&h)) || hex(&m["resaltado"]).is_some_and(|h| wanted(&h)))
+                                .filter_map(|m| m["texto"].as_str().map(str::to_string)).collect();
+                            if fill.is_some() || !pieces.is_empty() {
+                                found.push(crate::compact(json!({"columna": c["columna"], "fondo": fill, "texto": pieces})));
+                            }
+                        }
+                        if found.is_empty() { continue }
+                        hit["colores"] = json!(found);
+                    }
+                    add(score * 4 + 3, order, format!("R:{}:{r}", table["id"]), hit, &mut hits);
+                }
             }
         }
     }
-    hits.sort_by_key(|h| h.0);
+    hits.sort_by_key(|h| (h.0, h.1));
     let total = hits.len();
-    let shown: Vec<Value> = hits.into_iter().take(limit).map(|h| h.1).collect();
-    json!({"query": query, "total": total, "shown": shown.len(), "hits": shown})
+    let shown: Vec<Value> = hits.into_iter().take(opts.limit.max(1)).map(|h| h.2).collect();
+    json!({"query": query, "color": opts.color, "total": total, "shown": shown.len(), "hits": shown})
+}
+
+/// The colors a section line marks with (`<span style="color:#…">`,
+/// `<mark style="background:#…">`).
+fn marked_colors(line: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    for key in ["color:#", "background:#"] {
+        let mut rest = line;
+        while let Some(at) = rest.find(key) {
+            let hex: String = rest[at + key.len()..].chars().take(6).collect();
+            if hex.len() == 6 { out.push(hex) }
+            rest = &rest[at + key.len()..];
+        }
+    }
+    out
 }
 
 /// A pack's sections (folded title → text without page markers) and tables
@@ -144,7 +234,7 @@ fn load(dir: &Path) -> Result<Loaded, String> {
     let manifest = read_json(&dir.join("manifest.json")).ok_or_else(|| format!("{} no es un pack de DocPack", dir.display()))?;
     let index = read_json(&dir.join("index.json")).ok_or_else(|| format!("{} no tiene index.json", dir.display()))?;
     let mut sections = Vec::new();
-    for s in index["sections"].as_array().into_iter().flatten() {
+    for s in section_list(dir, &index).iter() {
         let body = s["file"].as_str().and_then(|f| std::fs::read_to_string(dir.join(f)).ok()).unwrap_or_default();
         let text = body.lines().filter(|l| !l.starts_with("<!--") && !l.starts_with("_Página") && !l.trim().is_empty()).map(str::trim).collect::<Vec<_>>().join("\n");
         sections.push((s["id"].as_str().unwrap_or("").to_string(), s["title"].as_str().unwrap_or("").to_string(), text));
@@ -285,7 +375,7 @@ pub fn page_text(pack: &Path, pages: &[u32]) -> Result<String, String> {
     let index = read_json(&pack.join("index.json")).ok_or_else(|| format!("{} no tiene index.json", pack.display()))?;
     let mut out = String::new();
     let mut any_pages = false;
-    for s in index["sections"].as_array().into_iter().flatten() {
+    for s in section_list(pack, &index).iter() {
         let (Some(start), Some(end)) = (s["page_start"].as_u64(), s["page_end"].as_u64()) else { continue };
         any_pages = true;
         if !pages.iter().any(|&p| p as u64 >= start && p as u64 <= end) { continue }

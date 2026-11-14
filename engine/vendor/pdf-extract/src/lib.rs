@@ -1287,6 +1287,8 @@ fn show_text(gs: &mut GraphicsState, s: &[u8],
     dlog!("{:?}", font.decode(s));
     dlog!("{:?}", font.decode(s).as_bytes());
     dlog!("{:?}", s);
+    // DocPack: the color text is painted with is its fill color.
+    output.text_color(&gs.fill_colorspace, &gs.fill_color)?;
     output.begin_word()?;
 
     for (c, length) in font.char_codes(s) {
@@ -1654,8 +1656,14 @@ impl<'a> Processor<'a> {
                         _ => { operation.operands.iter().map(|x| as_num(x)).collect() }
                     };
                 }
-                "G" | "g" | "RG" | "rg" | "K" | "k" => {
-                    dlog!("unhandled color operation {:?}", operation);
+                // DocPack: these set the color space too (PDF 32000-1, 8.6.8).
+                "g" | "rg" | "k" => {
+                    gs.fill_colorspace = match operation.operator.as_str() { "g" => ColorSpace::DeviceGray, "rg" => ColorSpace::DeviceRGB, _ => ColorSpace::DeviceCMYK };
+                    gs.fill_color = operation.operands.iter().map(|x| as_num(x)).collect();
+                }
+                "G" | "RG" | "K" => {
+                    gs.stroke_colorspace = match operation.operator.as_str() { "G" => ColorSpace::DeviceGray, "RG" => ColorSpace::DeviceRGB, _ => ColorSpace::DeviceCMYK };
+                    gs.stroke_color = operation.operands.iter().map(|x| as_num(x)).collect();
                 }
                 "TJ" => {
                     match operation.operands[0] {
@@ -1889,6 +1897,8 @@ pub trait OutputDev {
     fn end_line(&mut self)-> Result<(), OutputError>;
     fn stroke(&mut self, _ctm: &Transform, _colorspace: &ColorSpace, _color: &[f64], _path: &Path)-> Result<(), OutputError> {Ok(())}
     fn fill(&mut self, _ctm: &Transform, _colorspace: &ColorSpace, _color: &[f64], _path: &Path)-> Result<(), OutputError> {Ok(())}
+    /// DocPack: the fill color of the text shown next (until the next call).
+    fn text_color(&mut self, _colorspace: &ColorSpace, _color: &[f64]) -> Result<(), OutputError> {Ok(())}
 }
 
 

@@ -103,7 +103,13 @@ texto que antes salía roto. Lo que sí se leía antes se sigue leyendo.
 Los números cambian con cada documento, pero la idea se mantiene: **pagas por
 lo que lees, no por el documento entero.**
 
-## Instalación (Claude Code)
+## Instalación
+
+DocPack funciona en **Claude Code** como plugin y en **Muse** (Meta) como
+instalación local. En los dos casos corre en tu máquina y lee tus documentos
+igual: el mismo ejecutable, el mismo pack y las mismas reglas de lectura.
+
+### Claude Code
 
 Dentro de Claude Code:
 
@@ -137,6 +143,33 @@ crea igual y `manifest.json` dice qué no se pudo hacer y por qué:
 | Imágenes de página | incluido en Windows | incluido en macOS | `pdftoppm` (paquete `poppler-utils`) |
 | OCR de páginas escaneadas | OCR de Windows, en los idiomas de tu perfil | Vision de macOS, en tus idiomas | `tesseract` con sus idiomas (por ejemplo `tesseract-ocr-spa`) |
 | Números de página en Word | Microsoft Word o LibreOffice | LibreOffice | LibreOffice |
+
+### Muse
+
+Muse no instala plugins, pero su agente tiene su propia máquina Linux y puede
+instalar programas. Mándale este mensaje:
+
+```
+Instala DocPack en tu máquina: descarga y ejecuta
+https://raw.githubusercontent.com/xskyofx-lang/docpack/main/plugins/muse/install.sh
+y luego guarda como skill el archivo
+https://raw.githubusercontent.com/xskyofx-lang/docpack/main/plugins/muse/SKILL.md
+para que de ahora en adelante leas mis documentos PDF, Word, Excel y
+PowerPoint a través de su pack, no del archivo original.
+```
+
+- `install.sh` detecta la plataforma (Linux x64 o ARM64, macOS), descarga el
+  mismo ejecutable que trae el plugin de Claude Code a `~/.local/bin/docpack`
+  y lo verifica con `docpack --version`. No necesita Rust, Python ni compilar.
+- `SKILL.md` es la regla de lectura por partes, la misma que sigue Claude.
+- **Actualizaciones:** una vez por semana Muse corre `check-update.sh`, que
+  compara su versión con la publicada en este repositorio. Si hay una nueva,
+  te dice cuál es y qué mejora (del CHANGELOG) y te pregunta si la instala;
+  nunca actualiza sin tu permiso.
+
+Probado en la máquina de Muse el 14 de noviembre de 2026 con un Word real.
+Los detalles del adaptador están en
+[plugins/muse/README.md](plugins/muse/README.md).
 
 ## Cómo usarlo sin gastar tokens de más
 
@@ -202,13 +235,17 @@ Cómo se parte cada formato:
 
 | Formato | Secciones | Tablas | Además |
 |---|---|---|---|
-| Word (DOCX) | una por cada título, según los estilos del documento | CSV | página de cada sección e imagen de cada página (con Word o LibreOffice), imágenes en `figuras/`, listas con su nivel, encabezados y pies |
-| PDF | según los marcadores del PDF; si no tiene, una por página. Los marcadores más finos (un campo, un subcampo) quedan como subtítulos `###` dentro de la sección | CSV, con o sin bordes, aunque sigan en las páginas siguientes | OCR en las páginas escaneadas, imagen de cada página, índice de contenido marcado, páginas apaisadas enderezadas, sin el encabezado y el pie que se repiten |
+| Word (DOCX) | una por cada título, según los estilos del documento | CSV, con el color de cada celda aparte | página de cada sección e imagen de cada página (con Word o LibreOffice), imágenes en `figuras/`, listas con su nivel, encabezados y pies, texto en color |
+| PDF | según los marcadores del PDF; si no tiene, una por página. Los marcadores más finos (un campo, un subcampo) quedan como subtítulos `###` dentro de la sección | CSV, con o sin bordes, aunque sigan en las páginas siguientes, con el color de cada celda aparte | OCR en las páginas escaneadas, imagen de cada página, índice de contenido marcado, páginas apaisadas enderezadas, sin el encabezado y el pie que se repiten |
 | Excel (XLSX, XLS, XLSB, ODS) | una por hoja | un CSV por hoja | las fórmulas sin valor guardado se muestran como fórmula |
 | PowerPoint (PPTX) | una por diapositiva, en el orden de la presentación | CSV | número de diapositiva |
 
 Una sección muy larga viene dividida en partes de unos 2 000 tokens con sus
-números de línea, para que Claude lea solo el tramo que importa. Si la sección
+números de línea, para que Claude lea solo el tramo que importa. En un
+documento muy largo, el índice se queda con lo que sirve para elegir la
+sección (título, páginas, tokens, cuántas tablas y partes tiene) y el detalle
+de cada sección va en `secciones/index.json`: en una guía de 2 409 páginas el
+índice pasa de 104 KB a 32 KB. Si la sección
 tiene subtítulos, las partes empiezan en ellos y cada una dice cuál es: «PDS
 0158 (Business Activity)» en lugar de una frase suelta.
 
@@ -240,7 +277,25 @@ Cómo se sacan las partes que el archivo no trae escritas:
   línea del encabezado que cambia (el tema que empieza) se queda.
 - **Páginas apaisadas.** Un reporte girado dentro de una página vertical se
   endereza según hacia dónde corren sus letras, y se lee de izquierda a derecha
-  con sus columnas.
+  con sus columnas. Las letras que corren en otra dirección que el resto de la
+  página (un pie de página de lado, una etiqueta en el margen) se leen aparte,
+  en su propia dirección.
+- **Listas dentro de una celda.** Una viñeta o un guion pegado a su texto es
+  sangría, no una columna: la tabla de criterios con una lista de MCC en una
+  celda sigue siendo una tabla de dos columnas.
+- **Colores.** Cuando un documento marca cosas con color (la IRD en rojo que
+  no aplica, la fila gris que no entra en la primera entrega, «solo se prueba
+  lo rosa»), el pack lo conserva. `manifest.json` trae la leyenda: cada color
+  con su nombre (rojo, rosa, morado, gris…), su valor, si es de texto, de
+  fondo o resaltado, cuántas veces aparece y ejemplos. `tablas/Tnn.colores.json`
+  da el fondo de cada celda y los pedazos de su texto que van en otro color;
+  el CSV no cambia. En las secciones, el texto marcado va como
+  `<span style="color:#FF0000">`. El color de cada palabra sale del documento:
+  en Word, de la letra, de su estilo o del resaltado; en PDF, del color con
+  que se pinta cada letra y del relleno detrás de cada celda. El color del
+  cuerpo del texto (el que no marca nada) también sale del documento: de sus
+  estilos en Word y del color que más se usa en PDF. En PDF, una línea toda de
+  un color es el estilo de un título y no se marca.
 - **Páginas escaneadas.** Una página que es sobre todo una imagen pasa por el
   OCR del sistema. Su texto queda marcado como OCR en la sección
   (`<!-- página 3 · texto por OCR -->`) y `manifest.json` dice qué motor lo
@@ -255,6 +310,10 @@ Lo que hay que tener en cuenta (y el pack lo avisa cuando aplica):
   para verla antes de citar una celda.
 - El OCR puede equivocarse en letras o números; para un dato crítico, pide ver
   la imagen de la página.
+- En Word, el sombreado que pone el estilo de la tabla (filas alternas) no se
+  lee como marca; el que se le pone a una celda sí. En PDF, los colores de
+  tinta plana (Separation, DeviceN) no tienen un valor RGB que dar y no se
+  marcan.
 - Sin Word ni LibreOffice, las secciones de un Word van sin número de página y
   se citan por sección y línea.
 
@@ -274,7 +333,8 @@ salida es un JSON con la ruta del pack y sus números.
 | Comando | Para qué |
 |---|---|
 | `docpack text diseno.pdf --pages 4-5` | El texto de esas páginas, desde el pack, sin abrir el original |
-| `docpack find "ciclo de compensación"` | Buscar en todos los packs del proyecto: pack, sección o tabla, parte, página y línea |
+| `docpack find "ciclo de compensación"` | Buscar en todos los packs del proyecto: pack, sección o tabla, parte, página y línea. Primero lo escrito tal cual y los títulos de tabla y subtítulos; el índice de contenido al final; una línea repetida en cada página es un solo resultado. Filtros: `--pack`, `--in tablas` o `--in texto` |
+| `docpack find --color rosa` | Lo que el documento marca en ese color (o `--color FF69B4`): las celdas y los pedazos de texto, con o sin texto a buscar |
 | `docpack diff diseno_v1.3.docx diseno_v1.4.docx` | Qué cambió entre dos versiones: secciones y filas de tablas |
 | `docpack doctor` | Packs a medias o desactualizados, archivos ajenos en `docpack/` y documentos sin pack |
 | `docpack catalog` | Rehace `docpack/index.json` (se actualiza solo con cada pack) |
@@ -320,6 +380,8 @@ engine/                 el motor: biblioteca y comando docpack (Rust)
 plugins/
   claude-code/          el plugin de Claude Code: hook, skill, bin/ (lanzador y
                         ejecutable de Windows) y native/ (Linux y macOS)
+  muse/                 instalación para Muse: install.sh, SKILL.md y
+                        check-update.sh (usa los ejecutables de native/)
   codex/                reservado para un plugin de Codex
 docs/                   formato del pack y cómo conectar otro agente
 scripts/                compilar y empaquetar en local

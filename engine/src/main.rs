@@ -14,7 +14,7 @@ use std::path::{Path, PathBuf};
 const USAGE: &str = "Uso:
   docpack build <archivo> [--project <carpeta>] [--no-pages] [--force]
   docpack text <archivo> --pages 4-5 [--project <carpeta>]
-  docpack find \"<texto>\" [--project <carpeta>] [--limit N]
+  docpack find \"<texto>\" [--project <carpeta>] [--limit N] [--pack <nombre>] [--in tablas|texto] [--color <nombre o RRGGBB>]
   docpack diff <pack o documento> <pack o documento> [--project <carpeta>]
   docpack doctor [--project <carpeta>]
   docpack catalog [--project <carpeta>]
@@ -102,10 +102,13 @@ fn cmd_text(args: &[String]) -> i32 {
 }
 
 fn cmd_find(args: &[String]) -> i32 {
-    let args = parsed!(args, &["project", "limit"], &[]);
-    if args.words.is_empty() { eprintln!("Falta el texto a buscar\n{USAGE}"); return 2 }
-    let limit = args.flags.get("limit").and_then(|l| l.parse().ok()).unwrap_or(50);
-    print_json(&library::find(&project(&args).join("docpack"), &args.words.join(" "), limit))
+    let args = parsed!(args, &["project", "limit", "pack", "in", "color"], &[]);
+    let color = args.flags.get("color").cloned();
+    if args.words.is_empty() && color.is_none() { eprintln!("Falta el texto a buscar (o --color)\n{USAGE}"); return 2 }
+    let only = args.flags.get("in").cloned();
+    if only.as_deref().is_some_and(|o| o != "tablas" && o != "texto") { eprintln!("--in es tablas o texto\n{USAGE}"); return 2 }
+    let opts = library::Find { limit: args.flags.get("limit").and_then(|l| l.parse().ok()).unwrap_or(50), pack: args.flags.get("pack").cloned(), only, color };
+    print_json(&library::find_with(&project(&args).join("docpack"), &args.words.join(" "), &opts))
 }
 
 /// A pack folder as given, the pack of that name in the project, or the pack

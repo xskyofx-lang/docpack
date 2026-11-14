@@ -11,6 +11,7 @@ use sha2::{Digest, Sha256};
 use std::path::{Path, PathBuf};
 
 mod about;
+pub mod color;
 mod docx;
 pub mod library;
 mod ooxml;
@@ -61,7 +62,18 @@ pub struct Table {
     /// are quoted (it holds another table's caption); empty when nothing is
     /// known against it.
     pub check: String,
+    /// The cells the document marks with a color: their fill, and the pieces
+    /// of their text in a color of their own. The CSV keeps the plain text.
+    pub colors: Vec<CellColor>,
 }
+
+/// A piece of text in a color (or on a highlight) that marks it.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct Mark { pub text: String, pub color: Option<String>, pub fill: Option<String> }
+
+/// A table cell the document marks with color: row and column as in its CSV.
+#[derive(Debug, Clone, Default)]
+pub struct CellColor { pub row: usize, pub column: usize, pub fill: Option<String>, pub text: Vec<Mark> }
 
 /// An image embedded in the document (a diagram, a screenshot), kept as the
 /// document stores it.
@@ -89,6 +101,8 @@ pub struct Document {
     pub check_pages: Vec<u32>,
     /// What the document says of itself: title, version and date.
     pub about: About,
+    /// The colors the document marks with, how often and on what text.
+    pub colors: color::Legend,
 }
 
 /// A document's own title, version and date (its properties; the version
@@ -373,7 +387,25 @@ fn write_pack(dir: &Path, source: &Path, bytes: &[u8], sha: &str, mut doc: Docum
         let tokens = tokens_estimate(&csv);
         // A table larger than a section's part is data: filtered, not read.
         let query = (tokens > PART_TOKENS * 10).then_some("Tabla de datos grande: no la leas entera; fíltrala o resúmela con un script sobre el CSV (encabezado en header).");
-        table_entries.push(compact(serde_json::json!({"id": id, "title": table.title.trim(), "section": owner.get(&i).cloned(), "page": table.page, "pages": pages, "rows": table.rows.len(), "columns": columns, "header": header, "file": file, "tokens_estimate": tokens, "read": query, "check": table.check})));
+        // Its colors beside it: which cells, which fill, which words.
+        let (colors_file, colors) = if table.colors.is_empty() { (None, serde_json::Value::Null) } else {
+            let path = format!("tablas/{id}.colores.json");
+            let cells: Vec<serde_json::Value> = table.colors.iter().map(|c| compact(serde_json::json!({
+                "fila": c.row, "columna": c.column, "fondo": c.fill.as_deref().map(color::label),
+                "texto": c.text.iter().map(|m| compact(serde_json::json!({"texto": m.text, "color": m.color.as_deref().map(color::label), "resaltado": m.fill.as_deref().map(color::label)}))).collect::<Vec<_>>(),
+            }))).collect();
+            std::fs::write(staging.join(&path), serde_json::to_string(&cells).map_err(|e| e.to_string())?).map_err(io)?;
+            let mut count: std::collections::BTreeMap<String, usize> = Default::default();
+            for c in &table.colors {
+                if let Some(f) = &c.fill { *count.entry(format!("fondo {}", color::label(f))).or_default() += 1 }
+                for m in &c.text {
+                    if let Some(k) = &m.color { *count.entry(format!("texto {}", color::label(k))).or_default() += 1 }
+                    if let Some(k) = &m.fill { *count.entry(format!("resaltado {}", color::label(k))).or_default() += 1 }
+                }
+            }
+            (Some(path), serde_json::json!(count))
+        };
+        table_entries.push(compact(serde_json::json!({"id": id, "title": table.title.trim(), "section": owner.get(&i).cloned(), "page": table.page, "pages": pages, "rows": table.rows.len(), "columns": columns, "header": header, "file": file, "tokens_estimate": tokens, "read": query, "check": table.check, "colores": colors, "colores_file": colors_file})));
     }
     let mut section_entries = Vec::new();
     let mut total = 0u64;
@@ -408,11 +440,43 @@ fn write_pack(dir: &Path, source: &Path, bytes: &[u8], sha: &str, mut doc: Docum
             Err(e) => doc.notes.push(format!("Imágenes de página no generadas: {e}")),
         }
     }
+    // The colors the document marks with: a legend to tell "the pink ones"
+    // from the purple ones.
+    let legend: Vec<serde_json::Value> = doc.colors.entries().iter().map(|(kind, hex, u)| serde_json::json!({"uso": kind, "color": hex, "nombre": color::name(hex), "veces": u.count, "ejemplos": u.samples})).collect();
+    if !legend.is_empty() {
+        let top: Vec<String> = doc.colors.entries().iter().take(6).map(|(kind, hex, u)| format!("{kind} {} {hex} ({} {})", color::name(hex), u.count, if u.count == 1 { "vez" } else { "veces" })).collect();
+        doc.notes.push(format!("El documento marca con colores: {}{}. El color de cada celda está en tablas/Tnn.colores.json (el CSV lleva el texto sin color) y el texto marcado de las secciones va entre <span style=\"color:#RRGGBB\"> o <mark style=\"background:#RRGGBB\">; la lista completa, en colores de este manifiesto.", top.join(", "), if legend.len() > 6 { " y más" } else { "" }));
+    }
+    // A long document's detail of each section (its parts, outline, tables
+    // and figures) costs more to read than the parts it points to: it goes to
+    // secciones/index.json, and the index keeps what picks a section.
+    let detail_tokens = tokens_estimate(&serde_json::to_string(&section_entries).map_err(|e| e.to_string())?);
+    let light = detail_tokens > PART_TOKENS * 4;
+    let listed: Vec<serde_json::Value> = if light {
+        std::fs::write(staging.join("secciones").join("index.json"), serde_json::to_string(&section_entries).map_err(|e| e.to_string())?).map_err(io)?;
+        section_entries.iter().map(|e| {
+            let mut slim = serde_json::Map::new();
+            for key in ["id", "title", "kind", "level", "path", "page_start", "page_end", "file", "lines", "tokens_estimate"] {
+                if let Some(v) = e.get(key) { slim.insert(key.into(), v.clone()); }
+            }
+            for (key, count) in [("tables", "table_count"), ("parts", "part_count"), ("figures", "figure_count")] {
+                if let Some(n) = e.get(key).and_then(|v| v.as_array()).map(Vec::len) { slim.insert(count.into(), n.into()); }
+            }
+            serde_json::Value::Object(slim)
+        }).collect()
+    } else { section_entries.clone() };
+    let how = if light {
+        "Lee este índice para elegir la sección; su detalle (parts con líneas para leerla por partes, outline, tablas y figuras) está en secciones/index.json: busca ahí solo la sección elegida. Detalle de tablas en tablas/index.json y de figuras en figuras/index.json. paginas/pNNN.png solo para ver una página. El original solo si la persona lo pide."
+    } else {
+        "Lee este índice; abre solo las secciones que necesites y, de ellas, sus tablas (tablas/Tnn.csv) y figuras. Una sección larga trae outline con líneas para leerla por partes. Detalle de tablas en tablas/index.json y de figuras en figuras/index.json. paginas/pNNN.png solo para ver una página. El original solo si la persona lo pide."
+    };
     let file_name = source.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
     let index = serde_json::json!({
+        "colores": (!legend.is_empty()).then(|| doc.colors.entries().iter().map(|(kind, hex, u)| format!("{kind} {} {hex} ×{}", color::name(hex), u.count)).collect::<Vec<_>>()),
         "document": file_name, "kind": doc.kind, "pages": doc.pages,
-        "how_to_read": "Lee este índice; abre solo las secciones que necesites y, de ellas, sus tablas (tablas/Tnn.csv) y figuras. Una sección larga trae outline con líneas para leerla por partes. Detalle de tablas en tablas/index.json y de figuras en figuras/index.json. paginas/pNNN.png solo para ver una página. El original solo si la persona lo pide.",
-        "sections": section_entries,
+        "how_to_read": how,
+        "sections": listed,
+        "section_detail": light.then_some("secciones/index.json"),
         "tables": table_entries.len(), "figures": figure_entries.len(),
         "page_images": match (page_images.is_empty(), only) {
             (true, _) => serde_json::Value::Null,
@@ -431,6 +495,7 @@ fn write_pack(dir: &Path, source: &Path, bytes: &[u8], sha: &str, mut doc: Docum
         "options": {"pages": options.pages},
         "stats": {"sections": section_entries.len(), "tables": table_entries.len(), "figures": figure_entries.len(), "page_images": page_images.len(), "tokens_total_estimate": total},
         "notes": doc.notes,
+        "colores": legend,
         "original_unchanged": true,
     });
     // The index is what the AI reads first: compact JSON, no indentation tokens.

@@ -10,21 +10,22 @@
 //! running text, which keeps a reference where the table was. Pages with
 //! tables read by alignment, and pages whose text looks like columns that
 //! could not be read as a table, are listed so the pack carries their image.
-use crate::{Document, Section, Table};
+use crate::{color, CellColor, Document, Mark, Section, Table};
 use std::collections::{HashMap, HashSet};
 use lopdf::{content::Content, Dictionary, Object};
-use pdf_extract::{MediaBox, OutputDev, OutputError, Transform};
+use pdf_extract::{ColorSpace, MediaBox, OutputDev, OutputError, Transform};
 
 /// A drawn character: its baseline origin, advance and size, in page space,
-/// and the direction its line runs (the x axis of its text space).
+/// the direction its line runs (the x axis of its text space) and the color
+/// it is painted with ("FF0000"; None when the color space has no RGB).
 #[derive(Debug, Clone)]
-struct Glyph { x: f64, y: f64, advance: f64, size: f64, text: String, word_start: bool, dir: (f64, f64) }
+struct Glyph { x: f64, y: f64, advance: f64, size: f64, text: String, word_start: bool, dir: (f64, f64), color: Option<String> }
 
 /// A horizontal (y, x0, x1) or vertical (x, y0, y1) ruling segment.
 type Segment = (f64, f64, f64);
 
 #[derive(Default)]
-struct Page { glyphs: Vec<Glyph>, horizontal: Vec<Segment>, vertical: Vec<Segment>, areas: Vec<Area>, area: f64, image_area: f64, top: f64, bottom: f64, media: [f64; 4] }
+struct Page { glyphs: Vec<Glyph>, horizontal: Vec<Segment>, vertical: Vec<Segment>, areas: Vec<Area>, area_fills: Vec<Option<String>>, area: f64, image_area: f64, top: f64, bottom: f64, media: [f64; 4] }
 
 /// A filled area (x0, y0, x1, y1): a cell's background, never a line by itself.
 type Area = [f64; 4];
@@ -33,7 +34,28 @@ type Area = [f64; 4];
 /// (`Rules`): pdf-extract leaves even-odd fills (`f*`, how Word draws every
 /// border) unpainted.
 #[derive(Default)]
-struct Collector { pages: Vec<Page>, word_start: bool }
+struct Collector { pages: Vec<Page>, word_start: bool, color: Option<String> }
+
+/// "FF0000" of a color in a device (or calibrated, or ICC) color space, by
+/// its number of components: gray, RGB or CMYK. None for spot colors and
+/// patterns, whose RGB the page does not say.
+fn device_hex(space: &ColorSpace, c: &[f64]) -> Option<String> {
+    match space {
+        ColorSpace::DeviceGray | ColorSpace::CalGray(_) | ColorSpace::DeviceRGB | ColorSpace::CalRGB(_) | ColorSpace::DeviceCMYK | ColorSpace::ICCBased(_) => components_hex(c),
+        _ => None,
+    }
+}
+
+/// "FF0000" of a color's components: none (the initial black), gray, RGB or CMYK.
+fn components_hex(c: &[f64]) -> Option<String> {
+    match c.len() {
+        0 => Some(color::hex(0.0, 0.0, 0.0)),
+        1 => Some(color::hex(c[0], c[0], c[0])),
+        3 => Some(color::hex(c[0], c[1], c[2])),
+        4 => { let k = 1.0 - c[3]; Some(color::hex((1.0 - c[0]) * k, (1.0 - c[1]) * k, (1.0 - c[2]) * k)) }
+        _ => None,
+    }
+}
 
 impl OutputDev for Collector {
     fn begin_page(&mut self, _n: u32, media: &MediaBox, _art: Option<(f64, f64, f64, f64)>) -> Result<(), OutputError> {
@@ -50,12 +72,13 @@ impl OutputDev for Collector {
         let scale = if font_size != 0.0 { size / font_size.abs() } else { 0.0 };
         let word_start = std::mem::take(&mut self.word_start);
         if self.pages.is_empty() { self.pages.push(Page::default()) }
-        self.pages.last_mut().unwrap().glyphs.push(Glyph { x: trm.m31, y: trm.m32, advance: width * size + spacing * scale, size, text: text.to_string(), word_start, dir: (trm.m11, trm.m12) });
+        self.pages.last_mut().unwrap().glyphs.push(Glyph { x: trm.m31, y: trm.m32, advance: width * size + spacing * scale, size, text: text.to_string(), word_start, dir: (trm.m11, trm.m12), color: self.color.clone() });
         Ok(())
     }
     fn begin_word(&mut self) -> Result<(), OutputError> { self.word_start = true; Ok(()) }
     fn end_word(&mut self) -> Result<(), OutputError> { Ok(()) }
     fn end_line(&mut self) -> Result<(), OutputError> { Ok(()) }
+    fn text_color(&mut self, space: &ColorSpace, c: &[f64]) -> Result<(), OutputError> { self.color = device_hex(space, c); Ok(()) }
 }
 
 /// A PDF matrix [a b c d e f]: x' = a·x + c·y + e, y' = b·x + d·y + f.
@@ -72,7 +95,7 @@ enum Piece { Line((f64, f64), (f64, f64)), Rect([(f64, f64); 4]) }
 
 /// The ruling lines a page paints: every stroke and fill, in page space,
 /// through `cm` and the form XObjects it draws.
-struct Rules<'a> { pdf: &'a lopdf::Document, horizontal: Vec<Segment>, vertical: Vec<Segment>, areas: Vec<Area>, image_area: f64 }
+struct Rules<'a> { pdf: &'a lopdf::Document, horizontal: Vec<Segment>, vertical: Vec<Segment>, areas: Vec<Area>, area_fills: Vec<Option<String>>, image_area: f64, fill: Option<String> }
 
 impl<'a> Rules<'a> {
     fn line(&mut self, (x0, y0): (f64, f64), (x1, y1): (f64, f64)) {
@@ -92,7 +115,7 @@ impl<'a> Rules<'a> {
                     if filled && y1 - y0 <= THIN { self.line((x0, (y0 + y1) / 2.0), (x1, (y0 + y1) / 2.0)) }
                     else if filled && x1 - x0 <= THIN { self.line(((x0 + x1) / 2.0, y0), ((x0 + x1) / 2.0, y1)) }
                     else if stroked { self.line((x0, y0), (x1, y0)); self.line((x0, y1), (x1, y1)); self.line((x0, y0), (x0, y1)); self.line((x1, y0), (x1, y1)) }
-                    else { self.areas.push([x0, y0, x1, y1]) }
+                    else { self.areas.push([x0, y0, x1, y1]); self.area_fills.push(self.fill.clone()) }
                 }
             }
         }
@@ -104,15 +127,21 @@ impl<'a> Rules<'a> {
     }
     fn walk(&mut self, content: &[u8], resources: Option<&'a Dictionary>, start: Matrix, depth: u8) {
         let Ok(content) = Content::decode(content) else { return };
-        let mut stack: Vec<Matrix> = Vec::new();
+        let mut stack: Vec<(Matrix, Option<String>)> = Vec::new();
         let mut ctm = start;
         let mut pieces: Vec<Piece> = Vec::new();
         let (mut at, mut first) = ((0.0, 0.0), (0.0, 0.0));
         for op in &content.operations {
             let n: Vec<f64> = op.operands.iter().map(number).collect();
             match op.operator.as_str() {
-                "q" => stack.push(ctm),
-                "Q" => ctm = stack.pop().unwrap_or(start),
+                "q" => stack.push((ctm, self.fill.clone())),
+                "Q" => { let (m, f) = stack.pop().unwrap_or((start, None)); ctm = m; self.fill = f }
+                // The fill color areas are painted with, by its components.
+                "g" | "rg" | "k" | "sc" | "scn" => {
+                    let numeric = op.operands.iter().all(|o| o.as_float().is_ok() || o.as_i64().is_ok());
+                    self.fill = if numeric && !n.is_empty() { components_hex(&n) } else { None };
+                }
+                "cs" => self.fill = Some(color::hex(0.0, 0.0, 0.0)),
                 "cm" if n.len() == 6 => ctm = times(&[n[0], n[1], n[2], n[3], n[4], n[5]], &ctm),
                 "m" if n.len() == 2 => { at = point(&ctm, n[0], n[1]); first = at }
                 "l" if n.len() == 2 => { let to = point(&ctm, n[0], n[1]); pieces.push(Piece::Line(at, to)); at = to }
@@ -152,13 +181,13 @@ impl<'a> Rules<'a> {
 
 /// What a page draws besides its text: ruling lines, filled areas, images.
 fn draw(pdf: &lopdf::Document, id: lopdf::ObjectId, page: &mut Page) {
-    let mut rules = Rules { pdf, horizontal: Vec::new(), vertical: Vec::new(), areas: Vec::new(), image_area: 0.0 };
+    let mut rules = Rules { pdf, horizontal: Vec::new(), vertical: Vec::new(), areas: Vec::new(), area_fills: Vec::new(), image_area: 0.0, fill: Some(color::hex(0.0, 0.0, 0.0)) };
     let Ok(content) = pdf.get_page_content(id) else { return };
     // A page's resources are its own dictionary or one it refers to (also
     // inherited from its parents).
     let resources = pdf.get_page_resources(id).ok().and_then(|(own, refs)| own.or_else(|| refs.iter().find_map(|r| pdf.get_dictionary(*r).ok())));
     rules.walk(&content, resources, IDENTITY, 0);
-    (page.horizontal, page.vertical, page.areas, page.image_area) = (rules.horizontal, rules.vertical, rules.areas, rules.image_area);
+    (page.horizontal, page.vertical, page.areas, page.area_fills, page.image_area) = (rules.horizontal, rules.vertical, rules.areas, rules.area_fills, rules.image_area);
 }
 
 /// A page whose text runs up, down or upside down (a landscape report on a
@@ -212,7 +241,9 @@ const THIN: f64 = 3.0;
 /// still be the same column), top and bottom, cells and glyphs. A table read
 /// by its borders has fixed columns; one read by its aligned text has columns
 /// as wide as the blank lane between them.
-struct Grid { xs: Vec<f64>, slack: Vec<f64>, top: f64, bottom: f64, rows: Vec<Vec<String>>, members: Vec<usize>, stream: bool }
+struct Grid { xs: Vec<f64>, slack: Vec<f64>, top: f64, bottom: f64, rows: Vec<Vec<String>>, members: Vec<usize>, stream: bool,
+    /// The glyphs of each cell, row by row as in `rows`: their colors.
+    glyphs: Vec<Vec<Vec<usize>>> }
 
 fn cluster(mut values: Vec<f64>) -> Vec<f64> {
     values.sort_by(f64::total_cmp);
@@ -281,11 +312,14 @@ fn grids(page: &Page) -> Vec<Grid> {
         let filled = cells.iter().flatten().filter(|c| c.iter().any(|&g| !page.glyphs[g].text.trim().is_empty())).count();
         if filled < 2 { continue }
         // A cell spans from its column line to the next wall on its row.
-        let rows: Vec<Vec<String>> = cells.iter().enumerate().map(|(r, row)| row.iter().enumerate().map(|(c, glyphs)| {
+        let all: Vec<Vec<String>> = cells.iter().enumerate().map(|(r, row)| row.iter().enumerate().map(|(c, glyphs)| {
             let right = (c + 1..xs.len()).find(|&k| k == xs.len() - 1 || has_wall(xs[k], ys[r], ys[r + 1])).map(|k| xs[k]).unwrap_or(xs[c + 1]);
             cell_text(page, glyphs, xs[c], right)
-        }).collect::<Vec<_>>()).filter(|r| r.iter().any(|c| !c.is_empty())).collect();
-        out.push(Grid { slack: vec![0.0; xs.len()], top: ys[0], bottom: *ys.last().unwrap(), xs, rows, members, stream: false });
+        }).collect::<Vec<_>>()).collect();
+        let keep: Vec<bool> = all.iter().map(|r| r.iter().any(|c| !c.is_empty())).collect();
+        let rows: Vec<Vec<String>> = all.into_iter().zip(&keep).filter(|(_, k)| **k).map(|(r, _)| r).collect();
+        let glyphs: Vec<Vec<Vec<usize>>> = cells.into_iter().zip(&keep).filter(|(_, k)| **k).map(|(r, _)| r).collect();
+        out.push(Grid { slack: vec![0.0; xs.len()], top: ys[0], bottom: *ys.last().unwrap(), xs, rows, members, stream: false, glyphs });
     }
     out
 }
@@ -298,9 +332,51 @@ struct Line { y: f64, size: f64, glyphs: Vec<usize>, chunks: Vec<(f64, f64)> }
 /// wide: more than a space between words.
 const LANE: f64 = 0.6;
 
+/// A glyph whose line runs left to right on the page as read (after
+/// `upright`). Letters running another way (a footer set sideways, a label
+/// up a margin) are read apart, in their own direction.
+fn across(g: &Glyph) -> bool { g.dir.0 > 0.0 && g.dir.1.abs() <= g.dir.0 * 0.1 }
+
+/// The text of the letters that run another way than the page (`across` is
+/// false), read in their own direction: a line per baseline, its words in
+/// order. Each direction is a block of its own.
+fn other_ways(page: &Page, skip: &HashSet<usize>) -> String {
+    let mut by_way: std::collections::BTreeMap<u8, Vec<(f64, f64, &Glyph)>> = Default::default();
+    for (g, glyph) in page.glyphs.iter().enumerate() {
+        if skip.contains(&g) || across(glyph) { continue }
+        let (dx, dy) = glyph.dir;
+        // Turned so the glyph's line runs to the right: up, upside down, down.
+        let (way, (x, y)) = if dx.abs() >= dy.abs() { (2, (-glyph.x, -glyph.y)) } else if dy > 0.0 { (1, (glyph.y, -glyph.x)) } else { (3, (-glyph.y, glyph.x)) };
+        by_way.entry(way).or_default().push((x, y, glyph));
+    }
+    let mut out = Vec::new();
+    for mut gs in by_way.into_values() {
+        gs.sort_by(|a, b| b.1.total_cmp(&a.1));
+        let mut lines: Vec<Vec<(f64, f64, &Glyph)>> = Vec::new();
+        for g in gs {
+            match lines.last_mut() { Some(l) if (l[0].1 - g.1).abs() <= g.2.size.max(1.0) * 0.5 => l.push(g), _ => lines.push(vec![g]) }
+        }
+        let text: Vec<String> = lines.into_iter().map(|mut l| {
+            l.sort_by(|a, b| a.0.total_cmp(&b.0));
+            let (mut t, mut end) = (String::new(), f64::MIN);
+            for (x, _, g) in l {
+                if !t.is_empty() && x > end + g.size * 0.1 && !t.ends_with(' ') { t.push(' ') }
+                t.push_str(&g.text);
+                if !g.text.trim().is_empty() { end = x + g.advance }
+            }
+            t.split_whitespace().collect::<Vec<_>>().join(" ")
+        }).filter(|t| !t.is_empty()).collect();
+        if !text.is_empty() { out.push(text.join("
+")) }
+    }
+    out.join("
+
+")
+}
+
 /// The lines made of the glyphs no table took, top to bottom.
 fn text_lines(page: &Page, taken: &HashSet<usize>) -> Vec<Line> {
-    let mut order: Vec<usize> = (0..page.glyphs.len()).filter(|g| !taken.contains(g)).collect();
+    let mut order: Vec<usize> = (0..page.glyphs.len()).filter(|&g| !taken.contains(&g) && across(&page.glyphs[g])).collect();
     order.sort_by(|&a, &b| page.glyphs[b].y.total_cmp(&page.glyphs[a].y));
     let mut lines: Vec<Line> = Vec::new();
     for g in order {
@@ -312,14 +388,19 @@ fn text_lines(page: &Page, taken: &HashSet<usize>) -> Vec<Line> {
         }
     }
     for l in &mut lines {
-        let mut spans: Vec<(f64, f64)> = l.glyphs.iter().map(|&g| &page.glyphs[g]).filter(|g| !g.text.trim().is_empty()).map(|g| (g.x, g.x + g.advance.max(0.0))).collect();
+        let mut spans: Vec<(f64, f64, &str)> = l.glyphs.iter().map(|&g| &page.glyphs[g]).filter(|g| !g.text.trim().is_empty()).map(|g| (g.x, g.x + g.advance.max(0.0), g.text.as_str())).collect();
         spans.sort_by(|a, b| a.0.total_cmp(&b.0));
-        for (a, b) in spans {
-            match l.chunks.last_mut() {
-                Some(c) if a - c.1 < l.size * LANE => c.1 = c.1.max(b),
-                _ => l.chunks.push((a, b)),
+        // (start, end, text) of each chunk: a bullet or a dash is joined to
+        // the words it marks, which follow it within a few letters: a list
+        // inside a cell is indented text, not a column of its own.
+        let mut chunks: Vec<(f64, f64, String)> = Vec::new();
+        for (a, b, t) in spans {
+            match chunks.last_mut() {
+                Some(c) if a - c.1 < l.size * LANE || (bullet(&c.2) && a - c.1 < l.size * 2.5) => { c.1 = c.1.max(b); c.2.push_str(t) }
+                _ => chunks.push((a, b, t.to_string())),
             }
         }
+        l.chunks = chunks.into_iter().map(|(a, b, _)| (a, b)).collect();
     }
     lines.retain(|l| !l.chunks.is_empty());
     lines
@@ -455,6 +536,13 @@ fn streams(page: &Page, taken: &HashSet<usize>) -> (Vec<Grid>, bool) {
     (out, doubtful)
 }
 
+/// A list's bullet or dash alone ("•", "–", "-", "▪", "o"): no letter or
+/// digit, so a column of numbers is never one.
+fn bullet(text: &str) -> bool {
+    let t = text.trim();
+    !t.is_empty() && t.chars().count() <= 2 && (t == "o" || !t.chars().any(char::is_alphanumeric))
+}
+
 /// A caption: a word for table or figure and its number at the start of a
 /// line, the number ending in ":" or "." or followed by a dash ("Table 12:",
 /// "Table 8–34: …", "Tabla 3. …", "Figure 7 – …").
@@ -538,7 +626,7 @@ fn stream_table(page: &Page, block: &[Line], lanes: &[(f64, f64)], ruled_only: b
     }
     let walls: Vec<(f64, f64)> = (0..columns).map(|c| (if c == 0 { left } else { lanes[c - 1].1 }, if c + 1 == columns { right + block[0].size } else { lanes[c].1 })).collect();
     let mut members = Vec::new();
-    let cells: Vec<Vec<String>> = rows.iter().map(|row| {
+    let glyphs: Vec<Vec<Vec<usize>>> = rows.iter().map(|row| {
         let mut by_column: Vec<Vec<usize>> = vec![Vec::new(); columns];
         for &k in row {
             for &g in &block[k].glyphs {
@@ -547,8 +635,9 @@ fn stream_table(page: &Page, block: &[Line], lanes: &[(f64, f64)], ruled_only: b
                 members.push(g);
             }
         }
-        by_column.iter().enumerate().map(|(c, gs)| cell_text(page, gs, walls[c].0, walls[c].1)).collect()
+        by_column
     }).collect();
+    let cells: Vec<Vec<String>> = glyphs.iter().map(|by_column| by_column.iter().enumerate().map(|(c, gs)| cell_text(page, gs, walls[c].0, walls[c].1)).collect()).collect();
     if cells.iter().filter(|r| r.iter().filter(|c| !c.is_empty()).count() >= 2).count() < 2 { return None }
     // A column of nothing but bullets, its first row too, is a list.
     if (0..columns).any(|c| { let mut col = cells.iter().map(|r| &r[c]).filter(|t| !t.is_empty()).peekable(); col.peek().is_some() && col.all(|t| t.lines().all(list_mark)) }) { return None }
@@ -559,7 +648,7 @@ fn stream_table(page: &Page, block: &[Line], lanes: &[(f64, f64)], ruled_only: b
     slack.extend(lanes.iter().map(|l| (l.1 - l.0) / 2.0));
     slack.push(f64::INFINITY);
     let (first, last) = (&block[rows[0][0]], &block[*rows.last()?.last()?]);
-    Some(Grid { xs, slack, top: first.y + first.size, bottom: last.y - last.size * 0.3, rows: cells, members, stream: true })
+    Some(Grid { xs, slack, top: first.y + first.size, bottom: last.y - last.size * 0.3, rows: cells, members, stream: true, glyphs })
 }
 
 /// The text of one cell (between the walls `left` and `right`): its glyphs in
@@ -606,30 +695,153 @@ fn cell_text(page: &Page, glyphs: &[usize], left: f64, right: f64) -> String {
     out
 }
 
+/// The pieces of a cell's text in a color that marks them (not the body's),
+/// in reading order: consecutive letters of one color are one piece.
+fn color_pieces(page: &Page, glyphs: &[usize], body: &str) -> Vec<Mark> {
+    let mut gs: Vec<&Glyph> = glyphs.iter().map(|&g| &page.glyphs[g]).collect();
+    gs.sort_by(|a, b| b.y.total_cmp(&a.y));
+    let mut lines: Vec<Vec<&Glyph>> = Vec::new();
+    for g in gs {
+        match lines.last_mut() { Some(l) if (l[0].y - g.y).abs() <= g.size * 0.5 => l.push(g), _ => lines.push(vec![g]) }
+    }
+    let mut out: Vec<Mark> = Vec::new();
+    let mut open: Option<(String, String, f64)> = None; // (color, text, end x)
+    for line in &mut lines {
+        line.sort_by(|a, b| a.x.total_cmp(&b.x));
+        for g in line.iter() {
+            if g.text.trim().is_empty() { if let Some(o) = open.as_mut() { if !o.1.ends_with(' ') { o.1.push(' ') } } continue }
+            let mark = g.color.clone().filter(|c| color::marks_text(c, body));
+            match (&mut open, mark) {
+                (Some(o), Some(c)) if o.0 == c => {
+                    if g.x > o.2 + g.size * 0.1 && !o.1.ends_with(' ') { o.1.push(' ') }
+                    o.1.push_str(&g.text);
+                    o.2 = g.x + g.advance;
+                }
+                (_, Some(c)) => {
+                    if let Some((c0, t, _)) = open.take() { out.push(Mark { text: t.trim().to_string(), color: Some(c0), fill: None }) }
+                    open = Some((c, g.text.clone(), g.x + g.advance));
+                }
+                (_, None) => if let Some((c0, t, _)) = open.take() { out.push(Mark { text: t.trim().to_string(), color: Some(c0), fill: None }) },
+            }
+        }
+        if let Some(o) = open.as_mut() { if !o.1.ends_with(' ') { o.1.push(' ') } }
+    }
+    if let Some((c0, t, _)) = open.take() { out.push(Mark { text: t.trim().to_string(), color: Some(c0), fill: None }) }
+    out.retain(|m| !m.text.is_empty());
+    out
+}
+
+/// The fill behind a cell's text: the smallest filled area under its middle,
+/// when its color marks (not white).
+fn cell_fill(page: &Page, glyphs: &[usize]) -> Option<String> {
+    let visible: Vec<&Glyph> = glyphs.iter().map(|&g| &page.glyphs[g]).filter(|g| !g.text.trim().is_empty()).collect();
+    if visible.is_empty() { return None }
+    let x = visible.iter().map(|g| g.x + g.advance / 2.0).sum::<f64>() / visible.len() as f64;
+    let y = visible.iter().map(|g| g.y + g.size * 0.3).sum::<f64>() / visible.len() as f64;
+    page.areas.iter().zip(&page.area_fills)
+        .filter(|(a, _)| a[0] <= x && a[2] >= x && a[1] <= y && a[3] >= y)
+        .min_by(|(a, _), (b, _)| ((a[2] - a[0]) * (a[3] - a[1])).total_cmp(&((b[2] - b[0]) * (b[3] - b[1]))))
+        .and_then(|(_, f)| f.clone()).filter(|f| color::marks_fill(f))
+}
+
+/// The colored cells of a grid, rows from `skip` on, numbered from `base`.
+fn grid_colors(page: &Page, grid: &Grid, body: &str, skip: usize, base: usize) -> Vec<CellColor> {
+    let mut out = Vec::new();
+    for (r, row) in grid.glyphs.iter().enumerate().skip(skip) {
+        for (c, glyphs) in row.iter().enumerate() {
+            let (fill, text) = (cell_fill(page, glyphs), color_pieces(page, glyphs, body));
+            if fill.is_some() || !text.is_empty() { out.push(CellColor { row: base + r - skip, column: c, fill, text }) }
+        }
+    }
+    out
+}
+
+/// The glyphs of running text in a color that marks them, with their color:
+/// only where the color covers part of its line (a line all in one color is
+/// the document's style for a heading or a caption), and only a run of two
+/// letters or more (a lone colored glyph is a bullet drawn in a symbol font).
+fn text_marks(page: &Page, skip: &HashSet<usize>, body: &str) -> HashMap<usize, String> {
+    let mut by_line: std::collections::BTreeMap<i64, Vec<usize>> = Default::default();
+    for (g, glyph) in page.glyphs.iter().enumerate() {
+        if !skip.contains(&g) && !glyph.text.trim().is_empty() { by_line.entry(glyph.y.round() as i64).or_default().push(g) }
+    }
+    let mut out = HashMap::new();
+    for gs in by_line.values() {
+        let mut gs = gs.clone();
+        gs.sort_by(|&a, &b| page.glyphs[a].x.total_cmp(&page.glyphs[b].x));
+        let color_of = |g: usize| page.glyphs[g].color.clone().filter(|c| color::marks_text(c, body));
+        let marked = gs.iter().filter(|&&g| color_of(g).is_some()).count();
+        if marked == 0 || marked == gs.len() { continue }
+        // Runs of one color, left to right.
+        let mut run: Vec<usize> = Vec::new();
+        let flush = |run: &mut Vec<usize>, out: &mut HashMap<usize, String>| {
+            if run.len() >= 2 { if let Some(c) = color_of(run[0]) { for &g in run.iter() { out.insert(g, c.clone()); } } }
+            run.clear();
+        };
+        for &g in &gs {
+            match (color_of(g), run.first().and_then(|&f| color_of(f))) {
+                (Some(c), Some(r)) if c == r => run.push(g),
+                (Some(_), _) => { flush(&mut run, &mut out); run.push(g) }
+                (None, _) => flush(&mut run, &mut out),
+            }
+        }
+        flush(&mut run, &mut out);
+    }
+    out
+}
+
 /// Running text of a page in drawing order (the order pdf-extract's own
 /// plain text uses), with the tables' characters replaced by a reference and
 /// the `hidden` ones (the running header and footer) left out.
-fn page_text(page: &Page, table_of: &HashMap<usize, usize>, hidden: &HashSet<usize>) -> String {
+fn page_text(page: &Page, table_of: &HashMap<usize, usize>, hidden: &HashSet<usize>, marks: &HashMap<usize, String>) -> (String, Vec<(String, String)>) {
     let mut out = String::new();
     let (mut last_y, mut last_end, mut first) = (0.0f64, 0.0f64, true);
     let mut placed = HashSet::new();
+    // The colored piece being written: its color, where its text starts.
+    let mut open: Option<(String, usize)> = None;
+    let mut pieces: Vec<(String, String)> = Vec::new();
+    let close = |out: &mut String, open: &mut Option<(String, usize)>, pieces: &mut Vec<(String, String)>| {
+        if let Some((c, at)) = open.take() {
+            let text = out[at..].to_string();
+            out.truncate(at);
+            let trail = text.len() - text.trim_end().len();
+            out.push_str(&color::wrap(text.trim_end(), Some(&c), None));
+            out.push_str(&" ".repeat(trail));
+            pieces.push((c, text.trim().to_string()));
+        }
+    };
     for (g, glyph) in page.glyphs.iter().enumerate() {
-        if hidden.contains(&g) { continue }
+        if hidden.contains(&g) || !across(glyph) { continue }
         if let Some(&t) = table_of.get(&g) {
+            close(&mut out, &mut open, &mut pieces);
             if placed.insert(t) { out.push_str(&format!("\n\n[Tabla T{:02} → tablas/T{:02}.csv]\n\n", t + 1, t + 1)); first = true }
             continue;
         }
+        let mut sep = String::new();
         if !first && glyph.word_start {
-            if (glyph.y - last_y).abs() > glyph.size * 1.5 { out.push('\n') }
-            if glyph.x < last_end && (glyph.y - last_y).abs() > glyph.size * 0.5 { out.push('\n') }
-            if glyph.x > last_end + glyph.size * 0.1 { out.push(' ') }
-        } else if !first && (glyph.y - last_y).abs() > glyph.size * 0.5 { out.push('\n') }
+            if (glyph.y - last_y).abs() > glyph.size * 1.5 { sep.push('\n') }
+            if glyph.x < last_end && (glyph.y - last_y).abs() > glyph.size * 0.5 { sep.push('\n') }
+            if glyph.x > last_end + glyph.size * 0.1 { sep.push(' ') }
+        } else if !first && (glyph.y - last_y).abs() > glyph.size * 0.5 { sep.push('\n') }
+        let mark = marks.get(&g);
+        let blank = glyph.text.trim().is_empty();
+        // A piece ends at a line's end or where the color changes.
+        if sep.contains('\n') || (!blank && open.as_ref().map(|o| &o.0) != mark) { close(&mut out, &mut open, &mut pieces) }
+        out.push_str(&sep);
+        if let (Some(c), None, false) = (mark, &open, blank) { open = Some((c.clone(), out.len())) }
         out.push_str(&glyph.text);
         first = false;
         last_y = glyph.y;
         last_end = glyph.x + glyph.advance;
     }
-    out
+    close(&mut out, &mut open, &mut pieces);
+    // Letters running another way, after the page's own text.
+    let skip: HashSet<usize> = hidden.iter().copied().chain(table_of.keys().copied()).collect();
+    let other = other_ways(page, &skip);
+    if !other.is_empty() { out.push_str("
+
+"); out.push_str(&other) }
+    (out, pieces)
 }
 
 /// The lines of a page (height in whole points, text without digits or
@@ -750,6 +962,12 @@ pub fn extract(bytes: &[u8]) -> Result<Document, String> {
     // top of the next with the same columns is the same table. Between the two
     // there may only be the running header and footer: lines at the same
     // height with the same text on both pages (the page number aside).
+    // The body text's color: the one most letters are painted with.
+    let mut painted: HashMap<String, usize> = HashMap::new();
+    for g in collector.pages.iter().flat_map(|p| &p.glyphs).filter(|g| !g.text.trim().is_empty()) {
+        if let Some(c) = &g.color { *painted.entry(c.clone()).or_default() += 1 }
+    }
+    let body = painted.into_iter().max_by_key(|(_, n)| *n).map(|(c, _)| c).unwrap_or_else(|| color::hex(0.0, 0.0, 0.0));
     let lines: Vec<HashSet<(i64, String)>> = collector.pages.iter().map(|p| line_keys(p, |_| true)).collect();
     let bands: Vec<HashSet<(i64, String)>> = collector.pages.iter().map(band_keys).collect();
     let mut pages_text = Vec::new();
@@ -807,7 +1025,11 @@ pub fn extract(bytes: &[u8]) -> Result<Document, String> {
                 Some((t, xs, slack, stream, p)) if k == 0 && *p + 1 == number && (above_all || repeats_title(*t)) && same_columns(xs, slack, *stream) => {
                     let mut rows = grid.rows.clone();
                     // A header row repeated on every page is written once.
-                    if rows.first() == doc.tables[*t].rows.first() { rows.remove(0); }
+                    let skip = usize::from(rows.first() == doc.tables[*t].rows.first());
+                    if skip == 1 { rows.remove(0); }
+                    let base = doc.tables[*t].rows.len();
+                    let colors = grid_colors(page, grid, &body, skip, base);
+                    doc.tables[*t].colors.extend(colors);
                     doc.tables[*t].rows.extend(rows);
                     if !doc.tables[*t].pages.contains(&number) { doc.tables[*t].pages.push(number) }
                     *t
@@ -825,7 +1047,7 @@ pub fn extract(bytes: &[u8]) -> Result<Document, String> {
                         }
                     }
                     let title = title_lines.iter().rev().map(|l| line_text(page, l, f64::MIN, f64::MAX)).collect::<Vec<_>>().join(" ");
-                    doc.tables.push(Table { title, page: Some(number), pages: vec![number], rows: grid.rows.clone(), ..Default::default() });
+                    doc.tables.push(Table { title, page: Some(number), pages: vec![number], rows: grid.rows.clone(), colors: grid_colors(page, grid, &body, 0, 0), ..Default::default() });
                     doc.tables.len() - 1
                 }
             };
@@ -833,7 +1055,16 @@ pub fn extract(bytes: &[u8]) -> Result<Document, String> {
             last = if k == found.len() - 1 && below_all { Some((id, grid.xs.clone(), grid.slack.clone(), grid.stream, number)) } else { None };
         }
         if found.is_empty() { last = None }
-        pages_text.push(page_text(page, &table_of, &hidden));
+        let skip: HashSet<usize> = table_of.keys().copied().chain(hidden.iter().copied()).collect();
+        let (text, pieces) = page_text(page, &table_of, &hidden, &text_marks(page, &skip, &body));
+        for (c, t) in pieces { doc.colors.add("texto", &c, &t) }
+        pages_text.push(text);
+    }
+    for table in &doc.tables {
+        for c in &table.colors {
+            if let Some(f) = &c.fill { doc.colors.add("fondo", f, table.rows.get(c.row).and_then(|r| r.get(c.column)).map(String::as_str).unwrap_or("")) }
+            for m in &c.text { if let Some(k) = &m.color { doc.colors.add("texto", k, &m.text) } }
+        }
     }
     if !by_alignment.is_empty() {
         doc.notes.push(format!("Tablas sin bordes leídas por la alineación de sus columnas en {}: si una celda decide algo, verifícala con la imagen de su página.", pages_list(&by_alignment)));
@@ -853,7 +1084,8 @@ pub fn extract(bytes: &[u8]) -> Result<Document, String> {
     let titled: HashSet<String> = doc.tables.iter().filter(|t| caption(&t.title)).map(|t| key(&t.title)).collect();
     let mut orphans: Vec<(u32, String)> = Vec::new();
     for (i, text) in pages_text.iter().enumerate() {
-        for line in text.lines().map(str::trim) {
+        for line in text.lines().map(color::strip_tags) {
+            let line = line.trim();
             // A list of tables names them all, with leaders to their pages.
             if caption(line) && !figure(line) && !line.contains("....") && !titled.contains(&key(line)) { orphans.push((i as u32 + 1, line.chars().take(70).collect())) }
         }
@@ -915,7 +1147,7 @@ pub fn extract(bytes: &[u8]) -> Result<Document, String> {
             if title.chars().count() < 3 { continue }
             let text = &mut pages_text[item.page - 1];
             let lines: Vec<&str> = text.lines().collect();
-            let Some(at) = lines.iter().rposition(|l| !l.starts_with('#') && plain(l) == title) else { continue };
+            let Some(at) = lines.iter().rposition(|l| !l.starts_with('#') && plain(&color::strip_tags(l)) == title) else { continue };
             let mut out: Vec<String> = lines.iter().map(|l| l.to_string()).collect();
             out[at] = format!("{} {}", "#".repeat(item.level.min(6)), out[at].trim());
             *text = out.join("\n");
@@ -944,7 +1176,7 @@ pub fn extract(bytes: &[u8]) -> Result<Document, String> {
     if marks.is_empty() {
         doc.notes.push("El PDF no tiene marcadores: una sección por página.".into());
         for p in 1..=count {
-            let first = pages_text[(p - 1) as usize].lines().map(str::trim).find(|l| !l.is_empty() && !l.starts_with("[Tabla")).unwrap_or("").chars().take(70).collect::<String>();
+            let first = pages_text[(p - 1) as usize].lines().map(|l| color::strip_tags(l).trim().to_string()).find(|l| !l.is_empty() && !l.starts_with("[Tabla")).unwrap_or_default().chars().take(70).collect::<String>();
             let title = if first.is_empty() { format!("Página {p}") } else { format!("Página {p}: {first}") };
             doc.sections.push(Section { title, level: 1, page_start: Some(p), page_end: Some(p), text: text_of(p, p), ..Default::default() });
         }
