@@ -151,7 +151,7 @@ crea igual y `manifest.json` dice qué no se pudo hacer y por qué:
 
 ### Muse
 
-<p><img src="docs/img/muse.png" alt="Muse" height="140"></p>
+<p><img src="docs/img/muse.jpg" alt="Muse" height="160"></p>
 
 Muse no instala plugins, pero su agente tiene su propia máquina Linux y puede
 instalar programas. Mándale este mensaje:
