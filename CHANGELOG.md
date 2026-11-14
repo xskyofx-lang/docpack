@@ -1,5 +1,11 @@
 # Cambios
 
+## 0.4.4
+
+- DocPack como biblioteca de otro proyecto (Sky Agent) usa también la copia
+  corregida de `pdf-extract` (anchos de fuentes CID y colores): antes solo
+  la usaba el ejecutable de DocPack.
+
 ## 0.4.3
 
 - Índice de verdad pequeño en documentos largos: cada sección es una línea

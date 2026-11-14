@@ -1,6 +1,6 @@
 [package]
 name = "docpack"
-version = "0.4.3"
+version = "0.4.4"
 edition = "2021"
 authors = ["Juan Antonio Sandoval Puente"]
 homepage = "https://skyoflies.com"
@@ -25,7 +25,7 @@ hex = "0.4"
 zip = { version = "9", default-features = false, features = ["deflate"] }
 quick-xml = "0.42"
 calamine = "0.37.0"
-pdf-extract = "0.12.1"
+pdf-extract = { path = "vendor/pdf-extract", version = "0.12.1" }
 lopdf = "0.42"
 
 [target.'cfg(windows)'.dependencies]
@@ -53,5 +53,5 @@ objc2-vision = { version = "0.3", default-features = false, features = ["std", "
 #   the letters after it were placed on top of it;
 # - `g`, `rg` and `k` now set the fill color, and the output is told the
 #   color each piece of text is painted with (`OutputDev::text_color`).
-[patch.crates-io]
-pdf-extract = { path = "vendor/pdf-extract" }
+# A path dependency (not [patch]) so it also holds when DocPack is used as a
+# library from another project: a patch only applies to the top project.
