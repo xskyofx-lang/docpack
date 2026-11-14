@@ -101,11 +101,14 @@ mod engine {
         std::env::var_os("PATH").and_then(|p| std::env::split_paths(&p).map(|d| d.join(name)).find(|f| f.is_file()))
     }
 
-    /// A private folder with the PDF in it, removed when dropped.
+    /// A private folder with the PDF in it, removed when dropped. One per
+    /// use: two builds of the same document at once must not share it.
     struct Work(PathBuf);
+    static USES: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
     impl Work {
         fn new(bytes: &[u8]) -> Result<Self, String> {
-            let dir = std::env::temp_dir().join(format!("docpack-{}-{}", std::process::id(), crate::sha256(bytes).get(..12).unwrap_or("pdf")));
+            let use_number = USES.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            let dir = std::env::temp_dir().join(format!("docpack-{}-{use_number}-{}", std::process::id(), crate::sha256(bytes).get(..12).unwrap_or("pdf")));
             std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
             std::fs::write(dir.join("in.pdf"), bytes).map_err(|e| e.to_string())?;
             Ok(Work(dir))

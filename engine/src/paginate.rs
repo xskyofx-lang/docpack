@@ -14,9 +14,12 @@ pub struct Laid {
     pub engine: String,
 }
 
-/// Lays `bytes` (a .docx/.docm) out with the first engine this machine has.
+/// Lays `bytes` (a .docx/.docm) out with the first engine this machine has,
+/// in a folder of its own (two layouts of one document at once never share it).
 pub fn layout(bytes: &[u8], ext: &str) -> Result<Laid, String> {
-    let dir = std::env::temp_dir().join(format!("docpack-{}-{}", std::process::id(), crate::sha256(bytes).get(..12).unwrap_or("doc")));
+    static USES: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+    let use_number = USES.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let dir = std::env::temp_dir().join(format!("docpack-layout-{}-{use_number}-{}", std::process::id(), crate::sha256(bytes).get(..12).unwrap_or("doc")));
     std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
     let source = dir.join(format!("documento.{ext}"));
     let pdf = dir.join("documento.pdf");
