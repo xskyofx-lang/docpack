@@ -111,6 +111,11 @@ igual: el mismo ejecutable, el mismo pack y las mismas reglas de lectura.
 
 ### Claude Code
 
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/img/claude-oscuro.png">
+  <img src="docs/img/claude.png" alt="Claude" height="48">
+</picture>
+
 Dentro de Claude Code:
 
 ```
@@ -145,6 +150,8 @@ crea igual y `manifest.json` dice qué no se pudo hacer y por qué:
 | Números de página en Word | Microsoft Word o LibreOffice | LibreOffice | LibreOffice |
 
 ### Muse
+
+<p><img src="docs/img/muse.png" alt="Muse" height="140"></p>
 
 Muse no instala plugins, pero su agente tiene su propia máquina Linux y puede
 instalar programas. Mándale este mensaje:
