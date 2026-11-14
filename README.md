@@ -89,7 +89,7 @@ páginas, el índice pesa la mitad del documento.
 | Colores: texto marcado en rojo en un diseño técnico real | **670** pedazos en rojo, los mismos en el Word y en su PDF |
 | Colores: filas en gris (campos fuera de la primera entrega) en otro diseño | **382** celdas, con sus filas exactas |
 
-<p align="center"><img src="docs/img/tablas.svg" alt="Tablas leídas en guías PDF reales: de 0 a 2 271 en una guía de 2 409 páginas sin bordes; 530 tablas completas en una guía de 940 páginas; 5 de 5 tablas revisadas a mano iguales" width="720"></p>
+<p align="center"><img src="docs/img/tablas.svg" alt="Tablas leídas en guías PDF reales: en una guía de 2 409 páginas sin bordes, de 0 a 2 402 tablas, el 98 % de las que numera; en un manual de 3 220 páginas con tablas partidas, del 80 % al 95 % en un CSV propio; 9 de 9 tablas revisadas a mano iguales" width="720"></p>
 
 ### En 44 documentos reales (0.4.1)
 
