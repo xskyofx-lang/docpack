@@ -7,15 +7,17 @@ use crate::{Document, Section, Table};
 use quick_xml::events::Event;
 use std::collections::HashMap;
 
-/// Style id → heading level (0 title, 1-9 heading).
-fn heading_styles(zip: &mut ooxml::Zip) -> Result<HashMap<String, u8>, String> {
+/// Style id → heading level (0 title, 1-9 heading), and the ids of caption
+/// styles (the built-in "caption", and styles based on it).
+fn heading_styles(zip: &mut ooxml::Zip) -> Result<(HashMap<String, u8>, std::collections::HashSet<String>), String> {
     let Some(xml) = ooxml::part(zip, "word/styles.xml")? else {
         // Without styles.xml Word uses its built-in ids.
         let mut builtin: HashMap<String, u8> = (1..=9).map(|n| (format!("Heading{n}"), n as u8)).collect();
         builtin.insert("Title".into(), 0);
-        return Ok(builtin);
+        return Ok((builtin, ["Caption".to_string()].into()));
     };
     let mut styles: HashMap<String, (Option<String>, Option<u8>, bool)> = HashMap::new();
+    let mut captions = std::collections::HashSet::new();
     let mut reader = quick_xml::Reader::from_str(&xml);
     let mut current: Option<String> = None;
     loop {
@@ -32,6 +34,7 @@ fn heading_styles(zip: &mut ooxml::Zip) -> Result<HashMap<String, u8>, String> {
                     let name = attr(&e, "val").unwrap_or_default();
                     let entry = styles.entry(id.clone()).or_default();
                     if name == "Title" { entry.2 = true; }
+                    if name.eq_ignore_ascii_case("caption") { captions.insert(id.clone()); }
                     if entry.1.is_none() { entry.1 = name.to_ascii_lowercase().strip_prefix("heading ").and_then(|n| n.parse::<u8>().ok()).filter(|n| (1..=9).contains(n)).map(|n| n - 1); }
                 },
                 _ => {}
@@ -39,6 +42,16 @@ fn heading_styles(zip: &mut ooxml::Zip) -> Result<HashMap<String, u8>, String> {
             Ok(Event::End(e)) if local(e.name().as_ref()) == "style" => current = None,
             Ok(Event::Eof) | Err(_) => break,
             _ => {}
+        }
+    }
+    // A style based on a caption style is a caption too.
+    for id in styles.keys() {
+        let (mut at, mut hops) = (styles.get(id).and_then(|s| s.0.clone()), 0);
+        while let Some(base) = at {
+            if captions.contains(&base) { captions.insert(id.clone()); break }
+            hops += 1;
+            if hops > styles.len() { break }
+            at = styles.get(&base).and_then(|s| s.0.clone());
         }
     }
     let mut out = HashMap::new();
@@ -52,11 +65,11 @@ fn heading_styles(zip: &mut ooxml::Zip) -> Result<HashMap<String, u8>, String> {
             at = style.0.clone();
         }
     }
-    Ok(out)
+    Ok((out, captions))
 }
 
 #[derive(Default)]
-struct Para { text: String, style: String, own_level: Option<u8>, list: bool, list_level: usize, images: Vec<String> }
+struct Para { text: String, style: String, own_level: Option<u8>, list: bool, list_level: usize, images: Vec<String>, numbered_caption: bool }
 
 /// Relationship id → part path (word/media/image1.png) for the document's images.
 fn image_targets(zip: &mut ooxml::Zip) -> Result<HashMap<String, String>, String> {
@@ -80,7 +93,13 @@ fn image_targets(zip: &mut ooxml::Zip) -> Result<HashMap<String, String>, String
 pub fn extract(bytes: &[u8]) -> Result<Document, String> {
     let mut zip = ooxml::open(bytes)?;
     let xml = ooxml::part(&mut zip, "word/document.xml")?.ok_or("DOCX sin word/document.xml")?;
-    let levels = heading_styles(&mut zip)?;
+    let (levels, caption_styles) = heading_styles(&mut zip)?;
+    // A table's caption: a paragraph in a caption style, or numbered by a
+    // SEQ field ("Tabla {SEQ Tabla}"), just above it, or just below a table
+    // that had none above.
+    let mut caption_above: Option<String> = None;
+    let mut untitled: Option<usize> = None;
+    let mut in_field = false;
     let images = image_targets(&mut zip)?;
     let mut doc = Document { kind: "docx", ..Default::default() };
     // The same image file used twice is one figure (falla 7).
@@ -119,6 +138,8 @@ pub fn extract(bytes: &[u8]) -> Result<Document, String> {
                         None => {}
                     },
                     "t" if !empty => in_text = true,
+                    "instrText" if !empty => in_field = true,
+                    "fldSimple" => if attr(e, "instr").is_some_and(|i| i.trim_start().starts_with("SEQ")) { para.numbered_caption = true },
                     "tab" => para.text.push('\t'),
                     // A line break stays a line break, also inside a table cell: an
                     // apart condition must not run into the next one (falla 2).
@@ -131,15 +152,24 @@ pub fn extract(bytes: &[u8]) -> Result<Document, String> {
                 }
             }
             Ok(Event::Text(t)) if in_text => para.text.push_str(t),
+            Ok(Event::Text(t)) if in_field => { let code: &str = t; if code.trim_start().starts_with("SEQ") { para.numbered_caption = true } }
             Ok(Event::GeneralRef(r)) if in_text => { if let Some(c) = entity(r) { para.text.push(c) } }
             Ok(Event::End(e)) => match local(e.name().as_ref()) {
                 "t" => in_text = false,
+                "instrText" => in_field = false,
                 "p" => {
                     let text = para.text.trim_end().to_string();
                     if depth > 0 {
                         if !text.trim().is_empty() { if !cell.is_empty() { cell.push('\n') } cell.push_str(text.trim()); }
                     } else if !text.trim().is_empty() {
                         let level = para.own_level.or_else(|| levels.get(&para.style).copied());
+                        let caption = level.is_none() && (para.numbered_caption || caption_styles.contains(&para.style));
+                        let line = text.trim().replace('\n', " ");
+                        match (caption, untitled.take()) {
+                            (true, Some(t)) => doc.tables[t].title = line,
+                            (true, None) => caption_above = Some(line),
+                            (false, _) => caption_above = None,
+                        }
                         match level {
                             Some(l) => sections.push(Section { title: text.trim().replace('\n', " "), level: l.max(1), ..Default::default() }),
                             None => {
@@ -188,10 +218,12 @@ pub fn extract(bytes: &[u8]) -> Result<Document, String> {
                     if depth == 0 && !rows.is_empty() {
                         let section = sections.last_mut().unwrap();
                         let id = doc.tables.len();
+                        // Its caption above, else (until one below) its section's title.
+                        let title = match caption_above.take() { Some(c) => c, None => { untitled = Some(id); section.title.clone() } };
                         if !section.text.is_empty() && !section.text.ends_with("\n\n") { section.text.push('\n'); }
                         section.text.push_str(&format!("[Tabla T{:02} → tablas/T{:02}.csv]\n\n", id + 1, id + 1));
                         section.tables.push(id);
-                        doc.tables.push(Table { title: section.title.clone(), page: None, rows: std::mem::take(&mut rows) });
+                        doc.tables.push(Table { title, rows: std::mem::take(&mut rows), ..Default::default() });
                     }
                 }
                 _ => {}

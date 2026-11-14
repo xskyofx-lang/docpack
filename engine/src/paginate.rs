@@ -65,12 +65,12 @@ pub fn assign_pages(doc: &mut Document, laid: &Laid) {
             cursor += at + 1;
         }
     }
+    let pages: Vec<Vec<String>> = pdf_extract::extract_text_from_mem_by_pages(&laid.pdf).unwrap_or_default()
+        .iter().map(|p| p.lines().map(normal).filter(|l| !l.is_empty()).collect()).collect();
     // A heading Word gave no bookmark (a "Contents" title, a heading by its own
     // outline level) is looked for in the text, only on the pages between the
     // located headings around it: never in a table of contents elsewhere.
     if doc.sections.iter().any(|s| is_heading(s) && s.page_start.is_none()) {
-        let pages: Vec<Vec<String>> = pdf_extract::extract_text_from_mem_by_pages(&laid.pdf).unwrap_or_default()
-            .iter().map(|p| p.lines().map(normal).filter(|l| !l.is_empty()).collect()).collect();
         let starts: Vec<Option<u32>> = doc.sections.iter().map(|s| s.page_start).collect();
         for i in 0..doc.sections.len() {
             if !is_heading(&doc.sections[i]) || doc.sections[i].page_start.is_some() { continue }
@@ -87,6 +87,17 @@ pub fn assign_pages(doc: &mut Document, laid: &Laid) {
         let Some(start) = section.page_start else { continue };
         let next = starts[i + 1..].iter().flatten().next().copied();
         section.page_end = Some(next.map(|n| n.max(start)).unwrap_or(total).max(start));
+    }
+    // A table is on the first page of its section that has the text of its
+    // first cell; else on the page its section starts.
+    for section in &doc.sections {
+        let (Some(start), Some(end)) = (section.page_start, section.page_end) else { continue };
+        for &t in &section.tables {
+            let first = doc.tables[t].rows.first().and_then(|r| r.iter().map(|c| normal(c.lines().next().unwrap_or(""))).find(|c| !c.is_empty()));
+            let page = first.and_then(|cell| (start..=end).find(|p| pages.get(*p as usize - 1).is_some_and(|lines| lines.iter().any(|l| l.contains(&cell))))).unwrap_or(start);
+            doc.tables[t].page = Some(page);
+            doc.tables[t].pages = vec![page];
+        }
     }
     let found = doc.sections.iter().filter(|s| is_heading(s) && s.page_start.is_some()).count();
     doc.notes.retain(|n| !n.starts_with("Word no guarda páginas"));

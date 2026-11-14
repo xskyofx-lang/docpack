@@ -98,7 +98,7 @@ pub fn extract(bytes: &[u8]) -> Result<Document, String> {
             let id = doc.tables.len();
             section.text.push_str(&format!("[Tabla T{:02} → tablas/T{:02}.csv]\n\n", id + 1, id + 1));
             section.tables.push(id);
-            doc.tables.push(Table { title: section.title.clone(), page: Some(number), rows });
+            doc.tables.push(Table { title: section.title.clone(), page: Some(number), pages: vec![number], rows });
         }
         doc.sections.push(section);
     }

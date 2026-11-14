@@ -28,6 +28,8 @@ pub fn hook() -> i32 {
     let explicit_pages = input["tool_input"]["pages"].as_str().is_some_and(|p| !p.trim().is_empty());
     if explicit_pages { return 0 }
     let project = project_dir(&input);
+    // A file the project's .docpackignore names is read as it is.
+    if docpack::library::ignored(&project, &file) { return 0 }
     let built = match build(&file, &project, &Options { pages: true, force: false }) {
         Ok(b) => b,
         Err(e) => { eprintln!("docpack: no se pudo crear el pack de {}: {e}", file.display()); return 0 }

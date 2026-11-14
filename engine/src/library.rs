@@ -1,0 +1,331 @@
+//! What works on all the packs of a project (`<project>/docpack/`): the
+//! catalog (`docpack/index.json`), search, comparing two versions of a
+//! document, the health check and the text of chosen pages. Everything reads
+//! the packs, never the originals (except the health check, which hashes them
+//! to know whether a pack is still theirs).
+use crate::{pack_dir, sha256, supported, VERSION};
+use serde_json::{json, Value};
+use std::collections::HashMap;
+use std::path::{Path, PathBuf};
+
+fn read_json(path: &Path) -> Option<Value> {
+    serde_json::from_str(&std::fs::read_to_string(path).ok()?).ok()
+}
+
+/// Text compared without case, accents or repeated spaces.
+pub fn fold(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    for c in text.chars().flat_map(char::to_lowercase) {
+        let c = match c { 'á' | 'à' | 'ä' | 'â' => 'a', 'é' | 'è' | 'ë' | 'ê' => 'e', 'í' | 'ì' | 'ï' | 'î' => 'i', 'ó' | 'ò' | 'ö' | 'ô' => 'o', 'ú' | 'ù' | 'ü' | 'û' => 'u', 'ñ' => 'n', c => c };
+        if c.is_whitespace() { if !out.ends_with(' ') && !out.is_empty() { out.push(' ') } } else { out.push(c) }
+    }
+    out.trim_end().to_string()
+}
+
+/// The packs under `root`: folders with a manifest, by name.
+fn packs(root: &Path) -> Vec<(PathBuf, Value)> {
+    let Ok(entries) = std::fs::read_dir(root) else { return Vec::new() };
+    let mut out: Vec<(PathBuf, Value)> = entries.flatten().map(|e| e.path())
+        .filter(|p| p.is_dir() && !p.file_name().is_some_and(|n| n.to_string_lossy().starts_with('.')))
+        .filter_map(|p| read_json(&p.join("manifest.json")).map(|m| (p, m))).collect();
+    out.sort_by(|a, b| a.0.cmp(&b.0));
+    out
+}
+
+fn name_of(dir: &Path) -> String { dir.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default() }
+
+/// Writes `docpack/index.json`: every pack of the folder with its document's
+/// title, version and date, its size and how current it is. Replaces the old
+/// catalog in one step.
+pub fn write_catalog(root: &Path) -> Result<PathBuf, String> {
+    let entries: Vec<Value> = packs(root).iter().map(|(dir, m)| {
+        let about = &m["document"];
+        crate::compact(json!({
+            "pack": name_of(dir), "document": m["source"]["name"], "kind": m["source"]["kind"], "pages": m["source"]["pages"],
+            "title": about["title"], "version": about["version"], "date": about["date"],
+            "sections": m["stats"]["sections"], "tables": m["stats"]["tables"], "tokens_estimate": m["stats"]["tokens_total_estimate"],
+            "sha256": m["source"]["sha256"], "docpack_version": m["docpack_version"],
+        }))
+    }).collect();
+    let catalog = json!({
+        "how_to_use": "Un pack por documento: abre <pack>/index.json. Para buscar en todos: docpack find \"texto\". Para comparar dos versiones: docpack diff <pack1> <pack2>.",
+        "packs": entries,
+    });
+    let path = root.join("index.json");
+    let temp = root.join(format!(".index.json.tmp-{}", std::process::id()));
+    std::fs::write(&temp, serde_json::to_string(&catalog).map_err(|e| e.to_string())?).map_err(|e| e.to_string())?;
+    std::fs::rename(&temp, &path).map_err(|e| { let _ = std::fs::remove_file(&temp); e.to_string() })?;
+    Ok(path)
+}
+
+/// The rows of one of our CSV files (quoted cells, "" for a quote).
+pub fn csv_rows(text: &str) -> Vec<Vec<String>> {
+    let text = text.trim_start_matches('\u{feff}');
+    let (mut rows, mut row, mut cell, mut quoted) = (Vec::new(), Vec::new(), String::new(), false);
+    let mut chars = text.chars().peekable();
+    while let Some(c) = chars.next() {
+        match c {
+            '"' if quoted && chars.peek() == Some(&'"') => { cell.push('"'); chars.next(); }
+            '"' => quoted = !quoted,
+            ',' if !quoted => row.push(std::mem::take(&mut cell)),
+            '\n' if !quoted => { row.push(std::mem::take(&mut cell)); rows.push(std::mem::take(&mut row)); }
+            '\r' if !quoted => {}
+            c => cell.push(c),
+        }
+    }
+    if !cell.is_empty() || !row.is_empty() { row.push(cell); rows.push(row); }
+    rows
+}
+
+/// The page a section's line `n` (from 0) is on: its last page marker above,
+/// else the page the section starts on.
+fn page_at(lines: &[&str], n: usize, start: Option<u64>) -> Option<u64> {
+    lines[..=n].iter().rev().find_map(|l| l.strip_prefix("<!-- página ").and_then(|r| r.split(|c: char| !c.is_ascii_digit()).next()?.parse().ok())).or(start)
+}
+
+/// The words of a folded text, split where letters and digits stop.
+fn tokens(text: &str) -> Vec<&str> { text.split(|c: char| !c.is_alphanumeric()).filter(|w| !w.is_empty()).collect() }
+
+/// Every place in the packs under `root` that has all the words of `query`
+/// (in one line of a section, or one row of a table): its pack, section or
+/// table, part, page and line. A number matches a whole number; a word, the
+/// start of a word ("ciclo" finds "ciclos"). The query as written comes
+/// first, then the rest; tables of contents last. The first `limit`, and how
+/// many there are.
+pub fn find(root: &Path, query: &str, limit: usize) -> Value {
+    let folded = fold(query);
+    let words: Vec<String> = tokens(&folded).into_iter().map(str::to_string).collect();
+    // 0: the query as written; 1: all its words; None: not a match.
+    let rank = |text: &str| -> Option<u8> {
+        let t = fold(text);
+        let have = tokens(&t);
+        let all = !words.is_empty() && words.iter().all(|w| have.iter().any(|h| if w.chars().all(|c| c.is_ascii_digit()) { h == w } else { h.starts_with(w.as_str()) }));
+        all.then(|| if t.contains(&folded) { 0 } else { 1 })
+    };
+    let snippet = |text: &str| text.split_whitespace().collect::<Vec<_>>().join(" ").chars().take(240).collect::<String>();
+    let mut hits: Vec<(u8, Value)> = Vec::new();
+    let mut add = |rank: u8, hit: Value| hits.push((rank, crate::compact(hit)));
+    for (dir, _) in packs(root) {
+        let Some(index) = read_json(&dir.join("index.json")) else { continue };
+        let pack = name_of(&dir);
+        for section in index["sections"].as_array().into_iter().flatten() {
+            let Some(file) = section["file"].as_str() else { continue };
+            let Ok(body) = std::fs::read_to_string(dir.join(file)) else { continue };
+            let lines: Vec<&str> = body.lines().collect();
+            let contents = if section["kind"] == "toc" { 2 } else { 0 };
+            for (n, line) in lines.iter().enumerate() {
+                if line.starts_with("<!--") { continue }
+                let Some(r) = rank(line) else { continue };
+                let part = section["parts"].as_array().and_then(|parts| parts.iter().position(|p| p["lines"][0].as_u64().unwrap_or(0) <= n as u64 + 1 && p["lines"][1].as_u64().unwrap_or(0) >= n as u64 + 1)).map(|k| k + 1);
+                add(r + contents, json!({"pack": pack, "section": section["id"], "title": section["title"], "file": file, "line": n + 1, "part": part, "page": page_at(&lines, n, section["page_start"].as_u64()), "text": snippet(line)}));
+            }
+        }
+        for table in read_json(&dir.join("tablas").join("index.json")).as_ref().and_then(Value::as_array).into_iter().flatten() {
+            let Some(file) = table["file"].as_str() else { continue };
+            let Ok(text) = std::fs::read_to_string(dir.join(file)) else { continue };
+            for (r, row) in csv_rows(&text).iter().enumerate() {
+                let joined = row.join(" | ");
+                let Some(score) = rank(&joined) else { continue };
+                add(score, json!({"pack": pack, "table": table["id"], "title": table["title"], "file": file, "row": r + 1, "page": table["page"], "section": table["section"], "text": snippet(&joined)}));
+            }
+        }
+    }
+    hits.sort_by_key(|h| h.0);
+    let total = hits.len();
+    let shown: Vec<Value> = hits.into_iter().take(limit).map(|h| h.1).collect();
+    json!({"query": query, "total": total, "shown": shown.len(), "hits": shown})
+}
+
+/// A pack's sections (folded title → text without page markers) and tables
+/// (folded title and header → rows).
+struct Loaded { about: Value, sections: Vec<(String, String, String)>, tables: Vec<(String, String, Vec<Vec<String>>)> }
+
+fn load(dir: &Path) -> Result<Loaded, String> {
+    let manifest = read_json(&dir.join("manifest.json")).ok_or_else(|| format!("{} no es un pack de DocPack", dir.display()))?;
+    let index = read_json(&dir.join("index.json")).ok_or_else(|| format!("{} no tiene index.json", dir.display()))?;
+    let mut sections = Vec::new();
+    for s in index["sections"].as_array().into_iter().flatten() {
+        let body = s["file"].as_str().and_then(|f| std::fs::read_to_string(dir.join(f)).ok()).unwrap_or_default();
+        let text = body.lines().filter(|l| !l.starts_with("<!--") && !l.starts_with("_Página") && !l.trim().is_empty()).map(str::trim).collect::<Vec<_>>().join("\n");
+        sections.push((s["id"].as_str().unwrap_or("").to_string(), s["title"].as_str().unwrap_or("").to_string(), text));
+    }
+    let mut tables = Vec::new();
+    for t in read_json(&dir.join("tablas").join("index.json")).as_ref().and_then(Value::as_array).into_iter().flatten() {
+        let rows = t["file"].as_str().and_then(|f| std::fs::read_to_string(dir.join(f)).ok()).map(|c| csv_rows(&c)).unwrap_or_default();
+        tables.push((t["id"].as_str().unwrap_or("").to_string(), t["title"].as_str().unwrap_or("").to_string(), rows));
+    }
+    let about = json!({"pack": name_of(dir), "document": manifest["source"]["name"], "sha256": manifest["source"]["sha256"], "version": manifest["document"]["version"], "date": manifest["document"]["date"]});
+    Ok(Loaded { about: crate::compact(about), sections, tables })
+}
+
+/// Pairs items of two lists by key, in order (the n-th "Alcance" of one with
+/// the n-th of the other). Returns (pairs, only in a, only in b).
+fn pair<K: Eq + std::hash::Hash + Clone>(a: &[K], b: &[K]) -> (Vec<(usize, usize)>, Vec<usize>, Vec<usize>) {
+    let mut queue: HashMap<K, std::collections::VecDeque<usize>> = HashMap::new();
+    for (j, k) in b.iter().enumerate() { queue.entry(k.clone()).or_default().push_back(j) }
+    let (mut pairs, mut only_a) = (Vec::new(), Vec::new());
+    for (i, k) in a.iter().enumerate() {
+        match queue.get_mut(k).and_then(|q| q.pop_front()) { Some(j) => pairs.push((i, j)), None => only_a.push(i) }
+    }
+    let mut only_b: Vec<usize> = queue.into_values().flatten().collect();
+    only_b.sort();
+    (pairs, only_a, only_b)
+}
+
+/// The lines (or rows) of `a` missing from `b`, as many times as missing.
+fn missing<T: Eq + std::hash::Hash + Clone>(a: &[T], b: &[T]) -> Vec<T> {
+    let mut left: HashMap<&T, usize> = HashMap::new();
+    for x in b { *left.entry(x).or_default() += 1 }
+    a.iter().filter(|x| match left.get_mut(x) { Some(n) if *n > 0 => { *n -= 1; false } _ => true }).cloned().collect()
+}
+
+/// Rows shown per changed table; the counts are always whole.
+const ROWS_SHOWN: usize = 20;
+
+/// What changed from the pack `a` to the pack `b`: sections added, removed or
+/// with different text (matched by title), and tables added, removed or with
+/// different rows (matched by title and header).
+pub fn diff(a: &Path, b: &Path) -> Result<Value, String> {
+    let (a, b) = (load(a)?, load(b)?);
+    let keys = |l: &Loaded| l.sections.iter().map(|s| fold(&s.1)).collect::<Vec<_>>();
+    let (pairs, removed, added) = pair(&keys(&a), &keys(&b));
+    let changed: Vec<Value> = pairs.iter().filter(|(i, j)| a.sections[*i].2 != b.sections[*j].2).map(|(i, j)| {
+        let (la, lb): (Vec<&str>, Vec<&str>) = (a.sections[*i].2.lines().collect(), b.sections[*j].2.lines().collect());
+        json!({"title": b.sections[*j].1, "a": a.sections[*i].0, "b": b.sections[*j].0, "lines_removed": missing(&la, &lb).len(), "lines_added": missing(&lb, &la).len()})
+    }).collect();
+    let table_key = |t: &(String, String, Vec<Vec<String>>)| format!("{}|{}", fold(&t.1), fold(&t.2.first().map(|r| r.join(" | ")).unwrap_or_default()));
+    let (tpairs, tremoved, tadded) = pair(&a.tables.iter().map(table_key).collect::<Vec<_>>(), &b.tables.iter().map(table_key).collect::<Vec<_>>());
+    let tchanged: Vec<Value> = tpairs.iter().filter(|(i, j)| a.tables[*i].2 != b.tables[*j].2).map(|(i, j)| {
+        let (ra, rb) = (&a.tables[*i].2, &b.tables[*j].2);
+        let (gone, new) = (missing(ra, rb), missing(rb, ra));
+        json!({"title": b.tables[*j].1, "a": a.tables[*i].0, "b": b.tables[*j].0, "rows": [ra.len(), rb.len()],
+               "rows_removed": gone.len(), "rows_added": new.len(),
+               "removed": gone.iter().take(ROWS_SHOWN).map(|r| r.join(" | ")).collect::<Vec<_>>(),
+               "added": new.iter().take(ROWS_SHOWN).map(|r| r.join(" | ")).collect::<Vec<_>>()})
+    }).collect();
+    let same = removed.is_empty() && added.is_empty() && changed.is_empty() && tremoved.is_empty() && tadded.is_empty() && tchanged.is_empty();
+    let listed = |l: &Loaded, items: &[usize], tables: bool| items.iter().map(|&i| if tables { json!({"id": l.tables[i].0, "title": l.tables[i].1}) } else { json!({"id": l.sections[i].0, "title": l.sections[i].1}) }).collect::<Vec<_>>();
+    Ok(json!({
+        "a": a.about, "b": b.about, "same": same,
+        "sections": {"added": listed(&b, &added, false), "removed": listed(&a, &removed, false), "changed": changed},
+        "tables": {"added": listed(&b, &tadded, true), "removed": listed(&a, &tremoved, true), "changed": tchanged},
+    }))
+}
+
+/// The health of a project's packs: builds left half done, folders without
+/// a manifest, packs whose document changed or is gone, packs of an older
+/// DocPack, files that are not packs, and documents with no pack yet.
+pub fn doctor(project: &Path) -> Value {
+    let root = project.join("docpack");
+    let mut problems = Vec::new();
+    let mut count = 0;
+    let mut problem = |kind: &str, path: &Path, detail: String| problems.push(json!({"problem": kind, "path": path.to_string_lossy(), "detail": detail}));
+    for entry in std::fs::read_dir(&root).into_iter().flatten().flatten() {
+        let path = entry.path();
+        let name = name_of(&path);
+        if name.starts_with('.') && (name.contains(".tmp-") || name.contains(".old-")) {
+            problem("build_left_over", &path, "Restos de una construcción interrumpida: se pueden borrar.".into());
+            continue;
+        }
+        if path.is_file() {
+            if name != "index.json" { problem("foreign_file", &path, "Archivo que no es un pack dentro de docpack/.".into()) }
+            continue;
+        }
+        let Some(manifest) = read_json(&path.join("manifest.json")) else {
+            problem("incomplete", &path, "Carpeta sin manifest.json: no es un pack terminado.".into());
+            continue;
+        };
+        count += 1;
+        if !path.join("index.json").is_file() { problem("incomplete", &path, "Pack sin index.json.".into()); continue }
+        let source = PathBuf::from(manifest["source"]["file"].as_str().unwrap_or(""));
+        match std::fs::read(&source) {
+            Err(_) => problem("source_missing", &path, format!("El documento {} ya no está.", source.display())),
+            Ok(bytes) if manifest["source"]["sha256"].as_str() != Some(sha256(&bytes).as_str()) =>
+                problem("stale", &path, format!("{} cambió después de crear el pack: vuelve a construirlo.", source.display())),
+            Ok(_) if manifest["docpack_version"].as_str() != Some(VERSION) =>
+                problem("old_version", &path, format!("Hecho con DocPack {}; se rehace con {VERSION} la próxima vez que se lea.", manifest["docpack_version"].as_str().unwrap_or("?"))),
+            Ok(_) => {}
+        }
+    }
+    // Documents of the project without a pack (hidden folders and the packs
+    // themselves aside).
+    let mut stack = vec![project.to_path_buf()];
+    while let Some(dir) = stack.pop() {
+        for entry in std::fs::read_dir(&dir).into_iter().flatten().flatten() {
+            let path = entry.path();
+            let name = name_of(&path);
+            if name.starts_with('.') || path == root { continue }
+            if path.is_dir() { stack.push(path) } else if supported(&path) && !ignored(project, &path) && !pack_dir(project, &path).join("manifest.json").is_file() {
+                problem("no_pack", &path, "Documento sin pack.".into());
+            }
+        }
+    }
+    json!({"packs": count, "problems": problems.len(), "list": problems})
+}
+
+/// Page numbers from "4-5", "7" or "4-5,9".
+pub fn parse_pages(spec: &str) -> Result<Vec<u32>, String> {
+    let mut out = Vec::new();
+    for part in spec.split(',').map(str::trim).filter(|p| !p.is_empty()) {
+        let (a, b) = part.split_once(['-', '–']).unwrap_or((part, part));
+        let (a, b): (u32, u32) = (a.trim().parse().map_err(|_| format!("Página inválida: {part}"))?, b.trim().parse().map_err(|_| format!("Página inválida: {part}"))?);
+        if a == 0 || b < a { return Err(format!("Rango inválido: {part}")) }
+        out.extend(a..=b);
+    }
+    if out.is_empty() { return Err("Faltan las páginas (por ejemplo 4-5)".into()) }
+    out.sort();
+    out.dedup();
+    Ok(out)
+}
+
+/// The text of `pages` from a pack: each page under its marker. A document
+/// whose sections only know the page they start and end on (Word) gives the
+/// sections that cover those pages.
+pub fn page_text(pack: &Path, pages: &[u32]) -> Result<String, String> {
+    let index = read_json(&pack.join("index.json")).ok_or_else(|| format!("{} no tiene index.json", pack.display()))?;
+    let mut out = String::new();
+    let mut any_pages = false;
+    for s in index["sections"].as_array().into_iter().flatten() {
+        let (Some(start), Some(end)) = (s["page_start"].as_u64(), s["page_end"].as_u64()) else { continue };
+        any_pages = true;
+        if !pages.iter().any(|&p| p as u64 >= start && p as u64 <= end) { continue }
+        let Some(body) = s["file"].as_str().and_then(|f| std::fs::read_to_string(pack.join(f)).ok()) else { continue };
+        if body.contains("<!-- página ") {
+            let mut keep = false;
+            for line in body.lines() {
+                if let Some(n) = line.strip_prefix("<!-- página ").and_then(|r| r.split(|c: char| !c.is_ascii_digit()).next()?.parse::<u32>().ok()) { keep = pages.contains(&n) }
+                if keep { out.push_str(line); out.push('\n') }
+            }
+        } else {
+            out.push_str(&format!("<!-- {} · páginas {start}–{end} -->\n{}\n", s["id"].as_str().unwrap_or(""), body.trim()));
+        }
+    }
+    if !any_pages { return Err("Este pack no tiene números de página (Word sin motor de paginación en este equipo): lee sus secciones en index.json".into()) }
+    if out.is_empty() { return Err(format!("El documento no tiene esas páginas (tiene {})", index["pages"])) }
+    Ok(out)
+}
+
+/// Whether `path` matches a pattern of the project's `.docpackignore` (one
+/// per line, `#` comments; `*` any letters but `/`, `**` anything, `?` one
+/// letter), against its file name or its path from the project. Such files
+/// get no pack: data exports, logs.
+pub fn ignored(project: &Path, path: &Path) -> bool {
+    let Ok(rules) = std::fs::read_to_string(project.join(".docpackignore")) else { return false };
+    let name = name_of(path);
+    let relative = match (project.canonicalize(), path.canonicalize()) {
+        (Ok(p), Ok(f)) => f.strip_prefix(&p).map(|r| r.to_string_lossy().replace('\\', "/")).unwrap_or_default(),
+        _ => path.strip_prefix(project).map(|r| r.to_string_lossy().replace('\\', "/")).unwrap_or_default(),
+    };
+    rules.lines().map(str::trim).filter(|l| !l.is_empty() && !l.starts_with('#'))
+        .any(|rule| glob(rule.to_lowercase().as_bytes(), name.to_lowercase().as_bytes()) || (!relative.is_empty() && glob(rule.to_lowercase().as_bytes(), relative.to_lowercase().as_bytes())))
+}
+
+fn glob(pattern: &[u8], text: &[u8]) -> bool {
+    match pattern.first() {
+        None => text.is_empty(),
+        Some(b'*') if pattern.get(1) == Some(&b'*') => (0..=text.len()).any(|i| glob(&pattern[2..], &text[i..])),
+        Some(b'*') => (0..=text.len()).take_while(|&i| i == 0 || text[i - 1] != b'/').any(|i| glob(&pattern[1..], &text[i..])),
+        Some(b'?') => !text.is_empty() && text[0] != b'/' && glob(&pattern[1..], &text[1..]),
+        Some(c) => text.first() == Some(c) && glob(&pattern[1..], &text[1..]),
+    }
+}

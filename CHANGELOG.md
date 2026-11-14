@@ -1,5 +1,29 @@
 # Cambios
 
+## 0.4.0
+
+- Tablas sin bordes en PDF: se leen por los carriles en blanco entre sus
+  columnas, con encabezados sombreados, celdas de varias líneas y reglas entre
+  filas. Tablas con reglas pero abiertas por los lados salen con todas sus
+  columnas.
+- Tablas partidas entre páginas se unen aunque cambie el encabezado de la
+  página o se repita su título («(cont.)»).
+- `tablas/index.json` trae el título de cada tabla (su pie o la línea de
+  encima; en Word, el pie de tabla), su encabezado y sus páginas; las tablas
+  de Word llevan página cuando el documento se paginó.
+- Una página que parece tabla pero quedó como texto lleva su imagen aunque el
+  pack no tenga imágenes de página, y el manifiesto la nombra.
+- Nuevos comandos: `docpack text` (texto de unas páginas desde el pack),
+  `docpack find` (buscar en todos los packs), `docpack diff` (comparar dos
+  versiones), `docpack doctor` (salud de los packs) y `docpack catalog`.
+- Catálogo `docpack/index.json` con título, versión y fecha de cada documento.
+- Los Word se paginan siempre que haya Word o LibreOffice; `--no-pages` solo
+  omite las imágenes de página.
+- El índice de contenido se marca como `kind: "toc"`; una tabla de datos
+  enorme se marca para filtrarla en vez de leerla; `.docpackignore` deja fuera
+  archivos por patrón.
+- Reemplazar un pack ya no deja la carpeta sin pack si algo falla a la mitad.
+
 ## 0.3.1
 
 - Un pack armado sin páginas (por ejemplo, una vista previa rápida) se vuelve a

@@ -2,14 +2,17 @@
 //!
 //! `<project>/docpack/<file name>/` holds `manifest.json` (source, SHA-256,
 //! extractor), `index.json` (sections with pages and a token estimate, tables,
-//! page images), `secciones/*.md`, `tablas/*.csv` and, for a PDF on Windows,
-//! `paginas/*.png`. The original is only read, never changed. A pack whose
-//! manifest has the same source SHA and DocPack version is left as it is.
+//! page images), `secciones/*.md`, `tablas/*.csv` and `paginas/*.png`. The
+//! original is only read, never changed. A pack whose manifest has the same
+//! source SHA and DocPack version is left as it is. `docpack/index.json` lists
+//! every pack of the folder (library.rs).
 use serde::Serialize;
 use sha2::{Digest, Sha256};
 use std::path::{Path, PathBuf};
 
+mod about;
 mod docx;
+pub mod library;
 mod ooxml;
 mod paginate;
 mod pdf;
@@ -39,13 +42,20 @@ pub struct Section {
     pub path: Vec<String>,
     /// Text repeated on every page (headers and footers): no page of its own.
     pub every_page: bool,
+    /// A table of contents: its lines end in a page number after dot leaders
+    /// or a tab. Not where an answer is.
+    pub contents: bool,
 }
 
 /// A table, written as CSV once.
 #[derive(Debug, Clone, Default)]
 pub struct Table {
+    /// Its caption or the heading above it; else the title of its section.
     pub title: String,
+    /// The page it starts on.
     pub page: Option<u32>,
+    /// Every page it covers, when it goes on across pages.
+    pub pages: Vec<u32>,
     pub rows: Vec<Vec<String>>,
 }
 
@@ -70,12 +80,31 @@ pub struct Document {
     pub notes: Vec<String>,
     /// The OCR engine that read text from page images, when one did.
     pub ocr: Option<String>,
+    /// Pages whose image the pack carries even when it carries no page
+    /// images: text that looks like a table and stayed as text.
+    pub check_pages: Vec<u32>,
+    /// What the document says of itself: title, version and date.
+    pub about: About,
+}
+
+/// A document's own title, version and date (its properties; the version
+/// also from a "v1.4" in its title or file name).
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct About {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub version: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub date: Option<String>,
 }
 
 #[derive(Debug, Clone, Default)]
 pub struct Options {
-    /// Page numbers and page images: render PDF pages to PNG and lay a Word
-    /// document out with an engine of this machine to know its pages.
+    /// Page images: every page of a PDF (or of a Word document as laid out)
+    /// to PNG. Without them only the pages to check carry their image. A Word
+    /// document is laid out to know its pages either way, when this machine
+    /// has an engine for it.
     pub pages: bool,
     /// Rebuild even when the pack is current.
     pub force: bool,
@@ -207,13 +236,16 @@ fn slug(title: &str) -> String {
 }
 
 pub fn extract(bytes: &[u8], ext: &str) -> Result<Document, String> {
-    match ext {
+    let mut doc = match ext {
         "pdf" => pdf::extract(bytes),
         "docx" | "docm" => docx::extract(bytes),
         "pptx" => pptx::extract(bytes),
         "xlsx" | "xlsm" | "xls" | "xlsb" | "ods" => xlsx::extract(bytes, ext),
         other => Err(format!("Formato no compatible: .{other}")),
-    }
+    }?;
+    if ext != "pdf" { doc.about = about::office(bytes) }
+    for section in &mut doc.sections { section.contents = about::is_contents(&section.text) }
+    Ok(doc)
 }
 
 /// The pack's manifest when it is current for these bytes and has what is
@@ -255,7 +287,7 @@ pub fn build(source: &Path, project: &Path, options: &Options) -> Result<Built, 
     // The PDF whose pages are the document's pages: the file itself, or Word
     // laid out by an engine of this machine (paginate.rs).
     let mut laid: Option<Vec<u8>> = None;
-    if matches!(ext.as_str(), "docx" | "docm") && options.pages {
+    if matches!(ext.as_str(), "docx" | "docm") {
         match paginate::layout(&bytes, &ext) {
             Ok(l) => { paginate::assign_pages(&mut doc, &l); laid = Some(l.pdf) }
             Err(e) => {
@@ -265,6 +297,8 @@ pub fn build(source: &Path, project: &Path, options: &Options) -> Result<Built, 
         }
     }
     fold_empty_headings(&mut doc);
+    let file_name = source.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+    about::complete(&mut doc.about, &file_name);
     let pages_pdf = if ext == "pdf" { Some(bytes.as_slice()) } else { laid.as_deref() };
     write_pack(&dir, source, &bytes, &sha, doc, options, pages_pdf)
 }
@@ -322,7 +356,13 @@ fn write_pack(dir: &Path, source: &Path, bytes: &[u8], sha: &str, mut doc: Docum
         let csv: String = table.rows.iter().map(|r| r.iter().map(|c| csv_cell(c)).collect::<Vec<_>>().join(",")).collect::<Vec<_>>().join("\n");
         std::fs::write(staging.join(&file), format!("\u{feff}{csv}\n")).map_err(io)?;
         let columns = table.rows.iter().map(Vec::len).max().unwrap_or(0);
-        table_entries.push(serde_json::json!({"id": id, "section": owner.get(&i).cloned(), "page": table.page, "rows": table.rows.len(), "columns": columns, "file": file, "tokens_estimate": tokens_estimate(&csv)}));
+        // Its header (first row) and every page it covers when more than one.
+        let header: Vec<String> = table.rows.first().map(|r| r.iter().map(|c| c.split_whitespace().collect::<Vec<_>>().join(" ")).collect()).unwrap_or_default();
+        let pages = (table.pages.len() > 1).then_some(&table.pages);
+        let tokens = tokens_estimate(&csv);
+        // A table larger than a section's part is data: filtered, not read.
+        let query = (tokens > PART_TOKENS * 10).then_some("Tabla de datos grande: no la leas entera; fíltrala o resúmela con un script sobre el CSV (encabezado en header).");
+        table_entries.push(compact(serde_json::json!({"id": id, "title": table.title.trim(), "section": owner.get(&i).cloned(), "page": table.page, "pages": pages, "rows": table.rows.len(), "columns": columns, "header": header, "file": file, "tokens_estimate": tokens, "read": query})));
     }
     let mut section_entries = Vec::new();
     let mut total = 0u64;
@@ -343,13 +383,16 @@ fn write_pack(dir: &Path, source: &Path, bytes: &[u8], sha: &str, mut doc: Docum
         total += tokens;
         std::fs::write(staging.join(&file), &body).map_err(io)?;
         let lines = body.lines().count();
-        section_entries.push(compact(serde_json::json!({"id": id, "title": section.title.trim(), "level": section.level, "path": section.path, "page_start": section.page_start, "page_end": section.page_end, "file": file, "lines": lines, "tables": refs, "figures": figs, "tokens_estimate": tokens, "outline": outline(&body), "parts": parts(&body)})));
+        section_entries.push(compact(serde_json::json!({"id": id, "title": section.title.trim(), "kind": section.contents.then_some("toc"), "level": section.level, "path": section.path, "page_start": section.page_start, "page_end": section.page_end, "file": file, "lines": lines, "tables": refs, "figures": figs, "tokens_estimate": tokens, "outline": outline(&body), "parts": parts(&body)})));
     }
     total += table_entries.iter().map(|t| t["tokens_estimate"].as_u64().unwrap_or(0)).sum::<u64>();
 
+    // Every page when the pack carries page images; else only the pages to
+    // check with their image (text that looks like a table).
     let mut page_images = Vec::new();
-    if let (Some(pdf), true) = (pages_pdf, options.pages) {
-        match render::pdf_pages(pdf, &staging.join("paginas")) {
+    let only = (!options.pages).then_some(doc.check_pages.as_slice());
+    if let Some(pdf) = pages_pdf.filter(|_| options.pages || !doc.check_pages.is_empty()) {
+        match render::pdf_pages(pdf, &staging.join("paginas"), only) {
             Ok(files) => page_images = files,
             Err(e) => doc.notes.push(format!("Imágenes de página no generadas: {e}")),
         }
@@ -360,7 +403,11 @@ fn write_pack(dir: &Path, source: &Path, bytes: &[u8], sha: &str, mut doc: Docum
         "how_to_read": "Lee este índice; abre solo las secciones que necesites y, de ellas, sus tablas (tablas/Tnn.csv) y figuras. Una sección larga trae outline con líneas para leerla por partes. Detalle de tablas en tablas/index.json y de figuras en figuras/index.json. paginas/pNNN.png solo para ver una página. El original solo si la persona lo pide.",
         "sections": section_entries,
         "tables": table_entries.len(), "figures": figure_entries.len(),
-        "page_images": if page_images.is_empty() { serde_json::Value::Null } else { serde_json::json!({"count": page_images.len(), "file": "paginas/pNNN.png"}) },
+        "page_images": match (page_images.is_empty(), only) {
+            (true, _) => serde_json::Value::Null,
+            (false, None) => serde_json::json!({"count": page_images.len(), "file": "paginas/pNNN.png"}),
+            (false, Some(pages)) => serde_json::json!({"count": page_images.len(), "file": "paginas/pNNN.png", "only": pages}),
+        },
     });
     let index = compact(index);
     std::fs::write(staging.join("tablas").join("index.json"), serde_json::to_string(&table_entries).map_err(|e| e.to_string())?).map_err(io)?;
@@ -368,6 +415,7 @@ fn write_pack(dir: &Path, source: &Path, bytes: &[u8], sha: &str, mut doc: Docum
     let manifest = serde_json::json!({
         "docpack_version": VERSION,
         "source": {"file": source.to_string_lossy(), "name": file_name, "sha256": sha, "bytes": bytes.len(), "kind": doc.kind, "pages": doc.pages},
+        "document": doc.about,
         "extractor": {"name": "docpack", "version": VERSION, "ocr": doc.ocr},
         "options": {"pages": options.pages},
         "stats": {"sections": section_entries.len(), "tables": table_entries.len(), "figures": figure_entries.len(), "page_images": page_images.len(), "tokens_total_estimate": total},
@@ -378,14 +426,30 @@ fn write_pack(dir: &Path, source: &Path, bytes: &[u8], sha: &str, mut doc: Docum
     std::fs::write(staging.join("index.json"), serde_json::to_string(&index).map_err(|e| e.to_string())?).map_err(io)?;
     std::fs::write(staging.join("manifest.json"), serde_json::to_string_pretty(&manifest).map_err(|e| e.to_string())?).map_err(io)?;
 
-    // The previous pack of this file is replaced only when it is a DocPack pack.
+    // The previous pack of this file is replaced only when it is a DocPack
+    // pack: moved aside, the new one put in its place, then removed. A failure
+    // in between puts the old one back, so the folder is never left without a
+    // whole pack.
     if dir.exists() {
         if !dir.join("manifest.json").is_file() {
             let _ = std::fs::remove_dir_all(&staging);
             return Err(format!("{} existe y no es un pack de DocPack; no se sobrescribe", dir.display()));
         }
-        std::fs::remove_dir_all(dir).map_err(io)?;
+        let old = parent.join(format!(".{}.old-{}", dir.file_name().and_then(|n| n.to_str()).unwrap_or("pack"), std::process::id()));
+        let _ = std::fs::remove_dir_all(&old);
+        std::fs::rename(dir, &old).map_err(io)?;
+        if let Err(e) = std::fs::rename(&staging, dir) {
+            let _ = std::fs::rename(&old, dir);
+            let _ = std::fs::remove_dir_all(&staging);
+            return Err(e.to_string());
+        }
+        let _ = std::fs::remove_dir_all(&old);
+    } else {
+        std::fs::rename(&staging, dir).map_err(io)?;
     }
-    std::fs::rename(&staging, dir).map_err(io)?;
+    // The folder's catalog, when the pack is in a project's docpack/.
+    if parent.file_name().is_some_and(|n| n == "docpack") {
+        if let Err(e) = library::write_catalog(parent) { eprintln!("docpack: no se pudo actualizar {}: {e}", parent.join("index.json").display()) }
+    }
     Ok(Built { index: dir.join("index.json"), pack: dir.to_path_buf(), status: "built", sections: section_entries.len(), tables: table_entries.len(), page_images: page_images.len(), tokens_estimate: total })
 }

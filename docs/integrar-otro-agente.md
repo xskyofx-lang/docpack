@@ -24,12 +24,20 @@ docpack build <archivo> --project <carpeta> [--no-pages] [--force]
   si los argumentos están mal.
 
 ```bash
+docpack text <archivo> --pages 4-5 [--project <carpeta>]
+docpack find "<texto>" [--project <carpeta>] [--limit N]
+docpack diff <pack o documento> <pack o documento> [--project <carpeta>]
+docpack doctor [--project <carpeta>]
+docpack catalog [--project <carpeta>]
 docpack --version
 ```
 
-**Biblioteca (Rust):** `docpack::build`, `docpack::extract`, `docpack::supported`
-y `docpack::tokens_estimate`, si el adaptador se escribe en Rust dentro del
-mismo ejecutable.
+`text` imprime texto; `find`, `diff` y `doctor` imprimen JSON.
+
+**Biblioteca (Rust):** `docpack::build`, `docpack::extract`, `docpack::supported`,
+`docpack::tokens_estimate` y `docpack::library` (`find`, `diff`, `doctor`,
+`page_text`, `write_catalog`, `ignored`), si el adaptador se escribe en Rust
+dentro del mismo ejecutable.
 
 ## Lo que necesita un plugin nuevo
 
@@ -52,11 +60,12 @@ protocolo queda aislado y el motor no cambia.
 ## Formato del pack
 
 ```
+docpack/index.json  packs[] {pack, document, kind, pages, title?, version?, date?, sections, tables, tokens_estimate, sha256, docpack_version}
 docpack/<archivo>/
-  manifest.json   source {file, name, sha256, bytes, kind, pages}, docpack_version, stats, notes
-  index.json      sections[] {id, title, level, path?, page_start?, page_end?, file, lines, tokens_estimate, parts?, outline?, tables?, figures?}
+  manifest.json   source {file, name, sha256, bytes, kind, pages}, document {title?, version?, date?}, docpack_version, options, stats, notes
+  index.json      sections[] {id, title, kind?, level, path?, page_start?, page_end?, file, lines, tokens_estimate, parts?, outline?, tables?, figures?}, page_images {count, file, only?}
   secciones/      NN-<título>.md
-  tablas/         Tnn.csv, index.json
+  tablas/         Tnn.csv, index.json [{id, title, section, page, pages?, rows, columns, header, file, tokens_estimate, read?}]
   figuras/        Fnn.<ext>, index.json
   paginas/        pNNN.png  (cada página como imagen, de un PDF o de un Word)
 ```

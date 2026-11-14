@@ -1,2 +1,4 @@
 target/
 *.tmp-*
+# Expectations about other people's documents: never in the repository.
+pruebas-locales/

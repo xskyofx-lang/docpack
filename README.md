@@ -58,6 +58,8 @@ tokens en toda la conversación.
 | Páginas del Word (paginado por Word) | **33 de 33** secciones en su página correcta |
 | Tablas del mismo diseño exportado a PDF | **6 258 de 6 323** celdas iguales a las del Word (99 %) |
 | Página escaneada (solo imagen, sin texto) | texto completo con el OCR del sistema |
+| Guía técnica en PDF de 2 409 páginas con tablas sin bordes | de **0** a **2 271** tablas en CSV |
+| Tablas revisadas a mano en guías PDF y diseños Word reales (sin bordes, partidas en 2 y 3 páginas) | **5 de 5** iguales |
 
 ### El paquete
 
@@ -156,13 +158,14 @@ El documento original nunca se modifica. El pack queda junto a tu proyecto:
 tu-proyecto/
   diseno.docx
   docpack/
+    index.json        catálogo: cada pack con título, versión y fecha del documento
     diseno.docx/
-      manifest.json   de dónde salió, huella SHA-256, versión de DocPack, avisos
+      manifest.json   de dónde salió, huella SHA-256, título/versión/fecha, avisos
       index.json      secciones, líneas y tokens estimados → se lee primero
       secciones/      01-objetivo.md, 02-alcance.md …
-      tablas/         T01.csv … e index.json
+      tablas/         T01.csv … e index.json (título, encabezado y páginas de cada tabla)
       figuras/        F01.png …  (imágenes del Word) e index.json
-      paginas/        p001.png … (cada página como imagen, de un PDF o de un Word)
+      paginas/        p001.png … (cada página como imagen, o solo las que hay que revisar)
 ```
 
 Cómo se parte cada formato:
@@ -170,7 +173,7 @@ Cómo se parte cada formato:
 | Formato | Secciones | Tablas | Además |
 |---|---|---|---|
 | Word (DOCX) | una por cada título, según los estilos del documento | CSV | página de cada sección e imagen de cada página (con Word o LibreOffice), imágenes en `figuras/`, listas con su nivel, encabezados y pies |
-| PDF | según los marcadores del PDF; si no tiene, una por página | CSV, detectadas por sus bordes, aunque sigan en la página siguiente | OCR en las páginas escaneadas, imagen de cada página |
+| PDF | según los marcadores del PDF; si no tiene, una por página | CSV, con o sin bordes, aunque sigan en las páginas siguientes | OCR en las páginas escaneadas, imagen de cada página, índice de contenido marcado |
 | Excel (XLSX, XLS, XLSB, ODS) | una por hoja | un CSV por hoja | las fórmulas sin valor guardado se muestran como fórmula |
 | PowerPoint (PPTX) | una por diapositiva, en el orden de la presentación | CSV | número de diapositiva |
 
@@ -186,9 +189,14 @@ Cómo se sacan las partes que el archivo no trae escritas:
   estaba abierto con documentos tuyos, no lo cierra.
 - **Tablas de un PDF.** Se arman con los bordes que dibuja el PDF y la
   posición de cada letra: celdas combinadas, encabezados sombreados, palabras
-  que la celda partió en dos renglones y tablas que siguen en la página
-  siguiente bajo el mismo encabezado. Su texto va al CSV y no se repite en la
-  sección.
+  que la celda partió en dos renglones y tablas abiertas por los lados. Una
+  tabla **sin bordes** se lee por sus columnas: los carriles en blanco que
+  bajan por todas sus líneas (un párrafo los cierra enseguida), las reglas
+  entre filas si las hay, y celdas de varias líneas. Una tabla que sigue en la
+  página siguiente se une en un solo CSV aunque cambie el encabezado de la
+  página o repita su título. Cada tabla lleva su título (el pie o la línea de
+  encima), su encabezado y sus páginas. Su texto va al CSV y no se repite en
+  la sección.
 - **Páginas escaneadas.** Una página que es sobre todo una imagen pasa por el
   OCR del sistema. Su texto queda marcado como OCR en la sección
   (`<!-- página 3 · texto por OCR -->`) y `manifest.json` dice qué motor lo
@@ -196,8 +204,10 @@ Cómo se sacan las partes que el archivo no trae escritas:
 
 Lo que hay que tener en cuenta (y el pack lo avisa cuando aplica):
 
-- Una tabla de PDF sin bordes dibujados no tiene nada que la distinga del
-  texto, así que queda como texto en su sección.
+- Las tablas sin bordes se leen por la alineación de su texto: el pack dice en
+  qué páginas. Si una página parece tabla pero no se pudo leer como tal, queda
+  como texto y su imagen va en `paginas/` aunque el pack no lleve imágenes,
+  para verla antes de citar una celda.
 - El OCR puede equivocarse en letras o números; para un dato crítico, pide ver
   la imagen de la página.
 - Sin Word ni LibreOffice, las secciones de un Word van sin número de página y
@@ -213,8 +223,20 @@ docpack build diseno.pdf --project .
 ```
 
 Opciones: `--force` reconstruye aunque el pack esté al día y `--no-pages` no
-genera imágenes de página ni pagina los Word (es lo más rápido). La salida es un JSON con la ruta del pack y sus
-números.
+genera la imagen de cada página (los Word se paginan igual si hay con qué). La
+salida es un JSON con la ruta del pack y sus números.
+
+| Comando | Para qué |
+|---|---|
+| `docpack text diseno.pdf --pages 4-5` | El texto de esas páginas, desde el pack, sin abrir el original |
+| `docpack find "ciclo de compensación"` | Buscar en todos los packs del proyecto: pack, sección o tabla, parte, página y línea |
+| `docpack diff diseno_v1.3.docx diseno_v1.4.docx` | Qué cambió entre dos versiones: secciones y filas de tablas |
+| `docpack doctor` | Packs a medias o desactualizados, archivos ajenos en `docpack/` y documentos sin pack |
+| `docpack catalog` | Rehace `docpack/index.json` (se actualiza solo con cada pack) |
+
+Todos aceptan `--project <carpeta>`. Un archivo `.docpackignore` en el proyecto
+(un patrón por línea, por ejemplo `control_auditoria_*.xls`) deja fuera los
+archivos de datos que no tiene caso convertir.
 
 ## Actualizaciones
 

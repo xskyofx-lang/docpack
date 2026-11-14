@@ -1,17 +1,36 @@
 //! docpack build <archivo> [--project <carpeta>] [--no-pages] [--force]
+//! docpack text <archivo> --pages 4-5 [--project <carpeta>]
+//! docpack find "<texto>" [--project <carpeta>] [--limit N]
+//! docpack diff <pack o documento> <pack o documento> [--project <carpeta>]
+//! docpack doctor [--project <carpeta>]
+//! docpack catalog [--project <carpeta>]
 //! docpack hook claude-code   (PreToolUse hook for Claude Code; JSON on stdin)
 //! docpack --version
 mod claude_code;
 
-use docpack::{build, Options};
-use std::path::PathBuf;
+use docpack::{build, library, Options};
+use std::path::{Path, PathBuf};
 
-const USAGE: &str = "Uso:\n  docpack build <archivo> [--project <carpeta>] [--no-pages] [--force]\n  docpack hook claude-code\n  docpack --version";
+const USAGE: &str = "Uso:
+  docpack build <archivo> [--project <carpeta>] [--no-pages] [--force]
+  docpack text <archivo> --pages 4-5 [--project <carpeta>]
+  docpack find \"<texto>\" [--project <carpeta>] [--limit N]
+  docpack diff <pack o documento> <pack o documento> [--project <carpeta>]
+  docpack doctor [--project <carpeta>]
+  docpack catalog [--project <carpeta>]
+  docpack hook claude-code
+  docpack --version";
 
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
+    let rest = args.get(1..).unwrap_or(&[]);
     let code = match args.first().map(String::as_str) {
-        Some("build") => cmd_build(&args[1..]),
+        Some("build") => cmd_build(rest),
+        Some("text") => cmd_text(rest),
+        Some("find") => cmd_find(rest),
+        Some("diff") => cmd_diff(rest),
+        Some("doctor") => cmd_doctor(rest),
+        Some("catalog") => cmd_catalog(rest),
         Some("hook") => match args.get(1).map(String::as_str) {
             Some("claude-code") => claude_code::hook(),
             _ => { eprintln!("{USAGE}"); 2 }
@@ -22,25 +41,96 @@ fn main() {
     std::process::exit(code);
 }
 
-fn cmd_build(args: &[String]) -> i32 {
-    let mut file: Option<PathBuf> = None;
-    let mut project: Option<PathBuf> = None;
-    let mut options = Options { pages: true, force: false };
+/// The arguments of a command: its words, and the value of each `--flag`
+/// that takes one (`--project`, `--pages`, `--limit`); bare flags map to "".
+struct Args { words: Vec<String>, flags: std::collections::HashMap<String, String> }
+
+fn parse(args: &[String], valued: &[&str], bare: &[&str]) -> Result<Args, String> {
+    let (mut words, mut flags) = (Vec::new(), std::collections::HashMap::new());
     let mut i = 0;
     while i < args.len() {
-        match args[i].as_str() {
-            "--project" => { i += 1; project = args.get(i).map(PathBuf::from) }
-            "--no-pages" => options.pages = false,
-            "--force" => options.force = true,
-            other if file.is_none() => file = Some(PathBuf::from(other)),
-            other => { eprintln!("Argumento desconocido: {other}"); return 2 }
+        let a = &args[i];
+        if let Some(flag) = a.strip_prefix("--") {
+            if valued.contains(&flag) {
+                i += 1;
+                flags.insert(flag.to_string(), args.get(i).cloned().ok_or(format!("Falta el valor de --{flag}"))?);
+            } else if bare.contains(&flag) {
+                flags.insert(flag.to_string(), String::new());
+            } else {
+                return Err(format!("Argumento desconocido: {a}"));
+            }
+        } else {
+            words.push(a.clone());
         }
         i += 1;
     }
-    let Some(file) = file else { eprintln!("Falta el archivo"); return 2 };
-    let project = project.unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
-    match build(&file, &project, &options) {
-        Ok(built) => { println!("{}", serde_json::to_string_pretty(&built).unwrap_or_default()); 0 }
-        Err(e) => { eprintln!("docpack: {e}"); 1 }
-    }
+    Ok(Args { words, flags })
+}
+
+fn project(args: &Args) -> PathBuf {
+    args.flags.get("project").map(PathBuf::from).unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")))
+}
+
+fn print_json(value: &impl serde::Serialize) -> i32 {
+    println!("{}", serde_json::to_string_pretty(value).unwrap_or_default());
+    0
+}
+
+fn fail(e: impl std::fmt::Display) -> i32 { eprintln!("docpack: {e}"); 1 }
+
+macro_rules! parsed {
+    ($args:expr, $valued:expr, $bare:expr) => {
+        match parse($args, $valued, $bare) { Ok(a) => a, Err(e) => { eprintln!("{e}\n{USAGE}"); return 2 } }
+    };
+}
+
+fn cmd_build(args: &[String]) -> i32 {
+    let args = parsed!(args, &["project"], &["no-pages", "force"]);
+    let [file] = args.words.as_slice() else { eprintln!("Falta el archivo\n{USAGE}"); return 2 };
+    let options = Options { pages: !args.flags.contains_key("no-pages"), force: args.flags.contains_key("force") };
+    match build(Path::new(file), &project(&args), &options) { Ok(built) => print_json(&built), Err(e) => fail(e) }
+}
+
+/// The text of some pages, from the document's pack (built if needed): the
+/// way to look at pages without opening the original.
+fn cmd_text(args: &[String]) -> i32 {
+    let args = parsed!(args, &["project", "pages"], &[]);
+    let [file] = args.words.as_slice() else { eprintln!("Falta el archivo\n{USAGE}"); return 2 };
+    let pages = match library::parse_pages(args.flags.get("pages").map(String::as_str).unwrap_or("")) { Ok(p) => p, Err(e) => { eprintln!("{e}"); return 2 } };
+    let built = match build(Path::new(file), &project(&args), &Options { pages: false, force: false }) { Ok(b) => b, Err(e) => return fail(e) };
+    match library::page_text(&built.pack, &pages) { Ok(text) => { print!("{text}"); 0 } Err(e) => fail(e) }
+}
+
+fn cmd_find(args: &[String]) -> i32 {
+    let args = parsed!(args, &["project", "limit"], &[]);
+    if args.words.is_empty() { eprintln!("Falta el texto a buscar\n{USAGE}"); return 2 }
+    let limit = args.flags.get("limit").and_then(|l| l.parse().ok()).unwrap_or(50);
+    print_json(&library::find(&project(&args).join("docpack"), &args.words.join(" "), limit))
+}
+
+/// A pack folder as given, the pack of that name in the project, or the pack
+/// of a document of the project.
+fn pack_of(project: &Path, given: &str) -> PathBuf {
+    let path = PathBuf::from(given);
+    if path.join("manifest.json").is_file() { return path }
+    let named = project.join("docpack").join(given);
+    if named.join("manifest.json").is_file() { return named }
+    docpack::pack_dir(project, &path)
+}
+
+fn cmd_diff(args: &[String]) -> i32 {
+    let args = parsed!(args, &["project"], &[]);
+    let [a, b] = args.words.as_slice() else { eprintln!("Faltan las dos versiones\n{USAGE}"); return 2 };
+    let project = project(&args);
+    match library::diff(&pack_of(&project, a), &pack_of(&project, b)) { Ok(d) => print_json(&d), Err(e) => fail(e) }
+}
+
+fn cmd_doctor(args: &[String]) -> i32 {
+    let args = parsed!(args, &["project"], &[]);
+    print_json(&library::doctor(&project(&args)))
+}
+
+fn cmd_catalog(args: &[String]) -> i32 {
+    let args = parsed!(args, &["project"], &[]);
+    match library::write_catalog(&project(&args).join("docpack")) { Ok(path) => { println!("{}", path.display()); 0 } Err(e) => fail(e) }
 }

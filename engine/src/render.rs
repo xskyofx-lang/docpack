@@ -51,11 +51,12 @@ mod engine {
         Ok(stream)
     }
 
-    pub fn pdf_pages(bytes: &[u8], out: &std::path::Path) -> Result<Vec<String>, String> {
+    pub fn pdf_pages(bytes: &[u8], out: &std::path::Path, only: Option<&[u32]>) -> Result<Vec<String>, String> {
         std::fs::create_dir_all(out).map_err(|e| e.to_string())?;
         let doc = load(bytes)?;
         let mut files = Vec::new();
         for i in 0..doc.PageCount().map_err(e)? {
+            if only.is_some_and(|o| !o.contains(&(i + 1))) { continue }
             let stream = draw(&doc, i, PAGE_WIDTH)?;
             let size = stream.Size().map_err(e)? as u32;
             let reader = DataReader::CreateDataReader(&stream.GetInputStreamAt(0).map_err(e)?).map_err(e)?;
@@ -122,10 +123,16 @@ mod engine {
         std::fs::read_dir(dir).ok()?.flatten().map(|e| e.path()).find(|p| p.file_name().and_then(|n| n.to_str()).is_some_and(|n| n.starts_with(prefix) && n.ends_with(".png")))
     }
 
-    pub fn pdf_pages(bytes: &[u8], out: &Path) -> Result<Vec<String>, String> {
+    pub fn pdf_pages(bytes: &[u8], out: &Path, only: Option<&[u32]>) -> Result<Vec<String>, String> {
         let pdftoppm = which("pdftoppm").ok_or("las imágenes de página usan pdftoppm (poppler-utils), que no está instalado")?;
         let work = Work::new(bytes)?;
-        run(Command::new(&pdftoppm).args(["-png", "-scale-to-x", &PAGE_WIDTH.to_string(), "-scale-to-y", "-1"]).arg(work.0.join("in.pdf")).arg(work.0.join("p")))?;
+        let scale = ["-png", "-scale-to-x", &PAGE_WIDTH.to_string(), "-scale-to-y", "-1"].map(String::from);
+        match only {
+            None => { run(Command::new(&pdftoppm).args(&scale).arg(work.0.join("in.pdf")).arg(work.0.join("p")))?; }
+            Some(pages) => for n in pages {
+                run(Command::new(&pdftoppm).args(&scale).args(["-f", &n.to_string(), "-l", &n.to_string()]).arg(work.0.join("in.pdf")).arg(work.0.join("p")))?;
+            },
+        }
         std::fs::create_dir_all(out).map_err(|e| e.to_string())?;
         let mut pages: Vec<(u32, PathBuf)> = std::fs::read_dir(&work.0).map_err(|e| e.to_string())?.flatten().map(|e| e.path())
             .filter_map(|p| { let n = p.file_stem()?.to_str()?.strip_prefix("p-")?.parse().ok()?; Some((n, p)) }).collect();
@@ -199,11 +206,12 @@ mod engine {
         Ok(data.to_vec())
     }
 
-    pub fn pdf_pages(bytes: &[u8], out: &std::path::Path) -> Result<Vec<String>, String> {
+    pub fn pdf_pages(bytes: &[u8], out: &std::path::Path, only: Option<&[u32]>) -> Result<Vec<String>, String> {
         std::fs::create_dir_all(out).map_err(|e| e.to_string())?;
         let doc = document(bytes)?;
         let mut files = Vec::new();
         for n in 1..=CGPDFDocument::number_of_pages(Some(&doc)) {
+            if only.is_some_and(|o| !o.contains(&(n as u32))) { continue }
             let page = CGPDFDocument::page(Some(&doc), n).ok_or("página inexistente")?;
             let width = CGPDFPage::box_rect(Some(&page), CGPDFBox::MediaBox).size.width.max(1.0);
             let image = draw(&doc, n, PAGE_WIDTH as f64 / width)?;
