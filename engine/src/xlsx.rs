@@ -57,7 +57,7 @@ pub fn extract(bytes: &[u8], ext: &str) -> Result<Document, String> {
             let id = doc.tables.len();
             section.text = format!("{} filas × {} columnas desde {}{}.\n\n[Tabla T{:02} → tablas/T{:02}.csv]\n", rows.len(), c1 - c0 + 1, column(c0), r0 + 1, id + 1, id + 1);
             section.tables.push(id);
-            doc.tables.push(Table { title: name.clone(), page: Some(n as u32 + 1), pages: Vec::new(), rows });
+            doc.tables.push(Table { title: name.clone(), page: Some(n as u32 + 1), pages: Vec::new(), rows, ..Default::default() });
         }
         doc.sections.push(section);
     }

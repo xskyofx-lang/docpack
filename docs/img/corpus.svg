@@ -1,0 +1,40 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 720 410" font-family="Segoe UI, Helvetica, Arial, sans-serif" role="img" aria-labelledby="t d">
+  <title id="t">DocPack 0.4.0 contra 0.4.1 en 44 documentos reales</title>
+  <desc id="d">27 guías PDF, 7 diseños Word y 10 libros de Excel. Tablas numeradas con CSV propio: 88 % con 0.4.0, 97 % con 0.4.1. Tablas que se comían a la siguiente: 112 a 2. Palabras con letras desordenadas: 1 448 a 0. Caracteres de encabezados y pies repetidos: 1.72 millones a 0.08 millones. Tokens de texto: 7.7 millones a 5.2 millones, 32 % menos.</desc>
+  <rect width="720" height="410" rx="14" fill="#ffffff" stroke="#d8dee8"/>
+  <text x="28" y="40" font-size="19" font-weight="600" fill="#1b2330">0.4.0 contra 0.4.1 en 44 documentos reales</text>
+  <text x="28" y="62" font-size="13" fill="#5b6576">27 guías PDF (hasta 3 220 páginas), 7 diseños Word y 10 libros de Excel</text>
+  <rect x="318" y="72" width="12" height="10" rx="2" fill="#b8c1cf"/><text x="336" y="81" font-size="12" fill="#5b6576">0.4.0</text>
+  <rect x="388" y="72" width="12" height="10" rx="2" fill="#2f6fde"/><text x="406" y="81" font-size="12" fill="#5b6576">0.4.1</text>
+  <text x="28" y="112" font-size="14" fill="#1b2330">Tablas numeradas con CSV propio</text>
+  <text x="28" y="129" font-size="12" fill="#7a8494">de las 6 003 que numeran las guías</text>
+  <rect x="318" y="100" width="291" height="14" rx="3" fill="#b8c1cf"/>
+  <text x="615" y="111" font-size="12" fill="#5b6576">88 %</text>
+  <rect x="318" y="118" width="320" height="14" rx="3" fill="#2f6fde"/>
+  <text x="644" y="129" font-size="12" font-weight="600" fill="#1b2330">97 %</text>
+  <text x="28" y="168" font-size="14" fill="#1b2330">Tablas que se comían a la siguiente</text>
+  <text x="28" y="185" font-size="12" fill="#7a8494">título y filas de otra tabla dentro</text>
+  <rect x="318" y="156" width="330" height="14" rx="3" fill="#b8c1cf"/>
+  <text x="654" y="167" font-size="12" fill="#5b6576">112</text>
+  <rect x="318" y="174" width="6" height="14" rx="3" fill="#2f6fde"/>
+  <text x="330" y="185" font-size="12" font-weight="600" fill="#1b2330">2</text>
+  <text x="28" y="224" font-size="14" fill="#1b2330">Palabras con letras desordenadas</text>
+  <text x="28" y="241" font-size="12" fill="#7a8494">«sufb ield» por «subfield»</text>
+  <rect x="318" y="212" width="330" height="14" rx="3" fill="#b8c1cf"/>
+  <text x="654" y="223" font-size="12" fill="#5b6576">1 448</text>
+  <rect x="318" y="230" width="2" height="14" rx="3" fill="#2f6fde"/>
+  <text x="326" y="241" font-size="12" font-weight="600" fill="#1b2330">0</text>
+  <text x="28" y="280" font-size="14" fill="#1b2330">Encabezados y pies repetidos</text>
+  <text x="28" y="297" font-size="12" fill="#7a8494">caracteres de ruido en el texto</text>
+  <rect x="318" y="268" width="330" height="14" rx="3" fill="#b8c1cf"/>
+  <text x="654" y="279" font-size="12" fill="#5b6576">1.72 M</text>
+  <rect x="318" y="286" width="14" height="14" rx="3" fill="#2f6fde"/>
+  <text x="338" y="297" font-size="12" font-weight="600" fill="#1b2330">0.08 M</text>
+  <text x="28" y="336" font-size="14" fill="#1b2330">Tokens de texto para leer</text>
+  <text x="28" y="353" font-size="12" fill="#7a8494">secciones de las 27 guías PDF</text>
+  <rect x="318" y="324" width="330" height="14" rx="3" fill="#b8c1cf"/>
+  <text x="654" y="335" font-size="12" fill="#5b6576">7.7 M</text>
+  <rect x="318" y="342" width="224" height="14" rx="3" fill="#2f6fde"/>
+  <text x="548" y="353" font-size="12" font-weight="600" fill="#1b2330">5.2 M (−32 %)</text>
+  <text x="692" y="394" font-size="11" fill="#7a8494" text-anchor="end">Word y Excel salen idénticos · sin perder contenido (revisado palabra por palabra) · mismo tiempo de conversión</text>
+</svg>

@@ -57,6 +57,10 @@ pub struct Table {
     /// Every page it covers, when it goes on across pages.
     pub pages: Vec<u32>,
     pub rows: Vec<Vec<String>>,
+    /// Why its cells must be checked with the image of its page before they
+    /// are quoted (it holds another table's caption); empty when nothing is
+    /// known against it.
+    pub check: String,
 }
 
 /// An image embedded in the document (a diagram, a screenshot), kept as the
@@ -170,18 +174,25 @@ fn outline(body: &str) -> Vec<serde_json::Value> {
 const PART_TOKENS: u64 = 2_000;
 
 /// A long section in parts cut between paragraphs (a blank line), each with
-/// its lines and its first line as a hint. Mechanical, so it works whatever
-/// the document's formatting; nothing is guessed about where a topic starts.
+/// its lines and its first line as a hint. Where the document marks its own
+/// subheadings (a Markdown heading inside the section), a part also ends
+/// before one once it holds half a part, and its hint is the first
+/// heading it holds: a part is then a field or a topic, not a slice.
 fn parts(body: &str) -> Vec<serde_json::Value> {
     if tokens_estimate(body) <= PART_TOKENS * 2 { return Vec::new() }
     let lines: Vec<&str> = body.lines().collect();
+    let heading = |l: &str| l.starts_with("## ") || l.starts_with("### ") || l.starts_with("#### ") || l.starts_with("##### ") || l.starts_with("###### ");
     let mut out = Vec::new();
     let (mut start, mut acc) = (0usize, 0u64);
     for (i, line) in lines.iter().enumerate() {
         acc += tokens_estimate(line) + 1;
         let last = i + 1 == lines.len();
-        if (acc >= PART_TOKENS && line.trim().is_empty()) || last {
-            let hint = lines[start..=i].iter().map(|l| l.trim()).find(|l| !l.is_empty()).unwrap_or("").chars().take(60).collect::<String>();
+        let before_heading = acc >= PART_TOKENS / 2 && lines.get(i + 1).is_some_and(|next| heading(next));
+        if (acc >= PART_TOKENS && line.trim().is_empty()) || before_heading || last {
+            let part = &lines[start..=i];
+            let hint = part.iter().find(|l| heading(l)).map(|l| l.trim_start_matches('#').trim())
+                .or_else(|| part.iter().map(|l| l.trim()).find(|l| !l.is_empty()))
+                .unwrap_or("").chars().take(60).collect::<String>();
             out.push(serde_json::json!({"lines": [start + 1, i + 1], "tokens_estimate": acc, "starts": hint}));
             start = i + 1;
             acc = 0;
@@ -362,7 +373,7 @@ fn write_pack(dir: &Path, source: &Path, bytes: &[u8], sha: &str, mut doc: Docum
         let tokens = tokens_estimate(&csv);
         // A table larger than a section's part is data: filtered, not read.
         let query = (tokens > PART_TOKENS * 10).then_some("Tabla de datos grande: no la leas entera; fíltrala o resúmela con un script sobre el CSV (encabezado en header).");
-        table_entries.push(compact(serde_json::json!({"id": id, "title": table.title.trim(), "section": owner.get(&i).cloned(), "page": table.page, "pages": pages, "rows": table.rows.len(), "columns": columns, "header": header, "file": file, "tokens_estimate": tokens, "read": query})));
+        table_entries.push(compact(serde_json::json!({"id": id, "title": table.title.trim(), "section": owner.get(&i).cloned(), "page": table.page, "pages": pages, "rows": table.rows.len(), "columns": columns, "header": header, "file": file, "tokens_estimate": tokens, "read": query, "check": table.check})));
     }
     let mut section_entries = Vec::new();
     let mut total = 0u64;

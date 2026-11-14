@@ -1,6 +1,6 @@
 [package]
 name = "docpack"
-version = "0.4.0"
+version = "0.4.1"
 edition = "2021"
 authors = ["Juan Antonio Sandoval Puente"]
 homepage = "https://skyoflies.com"
@@ -46,3 +46,10 @@ objc2-core-foundation = { version = "0.3", default-features = false, features = 
 objc2-core-graphics = { version = "0.3", default-features = false, features = ["std", "CGBitmapContext", "CGColorSpace", "CGContext", "CGDataProvider", "CGImage", "CGPDFDocument", "CGPDFPage"] }
 objc2-image-io = { version = "0.3", default-features = false, features = ["std", "CGImageDestination", "objc2-core-graphics"] }
 objc2-vision = { version = "0.3", default-features = false, features = ["std", "VNObservation", "VNRecognizeTextRequest", "VNRequest", "VNRequestHandler", "VNTypes", "objc2-core-foundation", "objc2-core-graphics"] }
+
+# pdf-extract 0.12.1 (the latest) reads the `c_first c_last w` form of a CID
+# font's widths (/W) wrong: every glyph in such a range gets the default width,
+# 0 in many fonts, so the letters after it are placed on top of it. Its source
+# is in vendor/pdf-extract with that one function fixed.
+[patch.crates-io]
+pdf-extract = { path = "vendor/pdf-extract" }

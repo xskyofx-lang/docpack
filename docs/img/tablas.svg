@@ -1,28 +1,30 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 720 280" font-family="Segoe UI, Helvetica, Arial, sans-serif" role="img" aria-labelledby="t d">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 720 340" font-family="Segoe UI, Helvetica, Arial, sans-serif" role="img" aria-labelledby="t d">
   <title id="t">Tablas leídas en guías PDF reales</title>
-  <desc id="d">Guía técnica de 2 409 páginas con tablas sin bordes: 0 tablas con la versión 0.3, 2 271 con la 0.4. Guía de formatos de 940 páginas: 383 tablas con la 0.3, 530 con la 0.4, 157 de ellas unidas a lo largo de 3 páginas o más. Tablas revisadas a mano: 5 de 5 iguales.</desc>
-  <rect width="720" height="280" rx="14" fill="#ffffff" stroke="#d8dee8"/>
+  <desc id="d">Guía técnica de 2 409 páginas con tablas sin bordes: 0 tablas con la versión 0.3, 2 271 con la 0.4.0 y 2 402 con la 0.4.1, que cubren el 98 % de las tablas que la guía numera. Manual de 3 220 páginas con tablas partidas entre páginas: 80 % de sus tablas numeradas en un CSV propio con la 0.4.0, 95 % con la 0.4.1. Tablas revisadas a mano contra la imagen de su página: 9 de 9 iguales.</desc>
+  <rect width="720" height="340" rx="14" fill="#ffffff" stroke="#d8dee8"/>
   <text x="28" y="40" font-size="19" font-weight="600" fill="#1b2330">Tablas leídas en guías PDF reales</text>
-  <text x="28" y="62" font-size="13" fill="#5b6576">DocPack 0.3 (solo tablas con bordes) contra 0.4 (también sin bordes y unidas entre páginas)</text>
+  <text x="28" y="62" font-size="13" fill="#5b6576">0.3 solo leía tablas con bordes · 0.4 también sin bordes · 0.4.1 corta, une y verifica cada tabla</text>
 
   <text x="28" y="104" font-size="14" fill="#1b2330">Guía de 2 409 páginas</text>
   <text x="28" y="121" font-size="12" fill="#7a8494">tablas sin bordes</text>
-  <rect x="230" y="92" width="2" height="14" fill="#b8c1cf"/>
-  <text x="240" y="104" font-size="12" fill="#5b6576">0.3 · 0</text>
-  <rect x="230" y="110" width="440" height="16" rx="4" fill="#2f6fde"/>
-  <text x="662" y="122" font-size="12" font-weight="600" fill="#ffffff" text-anchor="end">0.4 · 2 271</text>
+  <rect x="230" y="88" width="2" height="14" fill="#b8c1cf"/>
+  <text x="240" y="100" font-size="12" fill="#5b6576">0.3 · 0</text>
+  <rect x="230" y="106" width="416" height="16" rx="4" fill="#b8c1cf"/>
+  <text x="638" y="118" font-size="12" font-weight="600" fill="#1b2330" text-anchor="end">0.4.0 · 2 271</text>
+  <rect x="230" y="126" width="440" height="16" rx="4" fill="#2f6fde"/>
+  <text x="662" y="138" font-size="12" font-weight="600" fill="#ffffff" text-anchor="end">0.4.1 · 2 402 · el 98 % de las que numera</text>
 
-  <text x="28" y="166" font-size="14" fill="#1b2330">Guía de 940 páginas</text>
-  <text x="28" y="183" font-size="12" fill="#7a8494">157 tablas de 3+ páginas unidas</text>
-  <rect x="230" y="154" width="74" height="14" rx="4" fill="#b8c1cf"/>
-  <text x="312" y="166" font-size="12" fill="#5b6576">0.3 · 383 partes</text>
-  <rect x="230" y="172" width="103" height="16" rx="4" fill="#2f6fde"/>
-  <text x="341" y="184" font-size="12" font-weight="600" fill="#1b2330">0.4 · 530 tablas completas</text>
+  <text x="28" y="186" font-size="14" fill="#1b2330">Manual de 3 220 páginas</text>
+  <text x="28" y="203" font-size="12" fill="#7a8494">tablas partidas entre páginas</text>
+  <rect x="230" y="176" width="352" height="16" rx="4" fill="#b8c1cf"/>
+  <text x="574" y="188" font-size="12" font-weight="600" fill="#1b2330" text-anchor="end">0.4.0 · 80 % de sus tablas numeradas en un CSV propio</text>
+  <rect x="230" y="196" width="418" height="16" rx="4" fill="#2f6fde"/>
+  <text x="640" y="208" font-size="12" font-weight="600" fill="#ffffff" text-anchor="end">0.4.1 · 95 %</text>
 
-  <text x="28" y="228" font-size="14" fill="#1b2330">Revisadas a mano</text>
-  <text x="28" y="245" font-size="12" fill="#7a8494">sin bordes, partidas, Word</text>
-  <text x="230" y="236" font-size="22" font-weight="700" fill="#1f8a4c">5 de 5</text>
-  <text x="310" y="236" font-size="13" fill="#5b6576">filas, columnas, encabezado, título y páginas iguales</text>
+  <text x="28" y="262" font-size="14" fill="#1b2330">Revisadas a mano</text>
+  <text x="28" y="279" font-size="12" fill="#7a8494">contra la imagen de su página</text>
+  <text x="230" y="270" font-size="22" font-weight="700" fill="#1f8a4c">9 de 9</text>
+  <text x="310" y="270" font-size="13" fill="#5b6576">filas, columnas, encabezado, título y páginas iguales</text>
 
-  <text x="692" y="268" font-size="11" fill="#7a8494" text-anchor="end">Una página que parece tabla y no se pudo leer lleva su imagen: 11 de 2 409</text>
+  <text x="692" y="318" font-size="11" fill="#7a8494" text-anchor="end">Cada tabla numerada que no quedó en su CSV se nombra en el pack con su página e imagen</text>
 </svg>

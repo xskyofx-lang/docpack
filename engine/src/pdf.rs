@@ -15,15 +15,16 @@ use std::collections::{HashMap, HashSet};
 use lopdf::{content::Content, Dictionary, Object};
 use pdf_extract::{MediaBox, OutputDev, OutputError, Transform};
 
-/// A drawn character: its baseline origin, advance and size, in page space.
+/// A drawn character: its baseline origin, advance and size, in page space,
+/// and the direction its line runs (the x axis of its text space).
 #[derive(Debug, Clone)]
-struct Glyph { x: f64, y: f64, advance: f64, size: f64, text: String, word_start: bool }
+struct Glyph { x: f64, y: f64, advance: f64, size: f64, text: String, word_start: bool, dir: (f64, f64) }
 
 /// A horizontal (y, x0, x1) or vertical (x, y0, y1) ruling segment.
 type Segment = (f64, f64, f64);
 
 #[derive(Default)]
-struct Page { glyphs: Vec<Glyph>, horizontal: Vec<Segment>, vertical: Vec<Segment>, areas: Vec<Area>, area: f64, image_area: f64, top: f64, bottom: f64 }
+struct Page { glyphs: Vec<Glyph>, horizontal: Vec<Segment>, vertical: Vec<Segment>, areas: Vec<Area>, area: f64, image_area: f64, top: f64, bottom: f64, media: [f64; 4] }
 
 /// A filled area (x0, y0, x1, y1): a cell's background, never a line by itself.
 type Area = [f64; 4];
@@ -36,7 +37,7 @@ struct Collector { pages: Vec<Page>, word_start: bool }
 
 impl OutputDev for Collector {
     fn begin_page(&mut self, _n: u32, media: &MediaBox, _art: Option<(f64, f64, f64, f64)>) -> Result<(), OutputError> {
-        self.pages.push(Page { area: ((media.urx - media.llx) * (media.ury - media.lly)).abs(), top: media.ury.max(media.lly), bottom: media.ury.min(media.lly), ..Default::default() });
+        self.pages.push(Page { area: ((media.urx - media.llx) * (media.ury - media.lly)).abs(), top: media.ury.max(media.lly), bottom: media.ury.min(media.lly), media: [media.llx.min(media.urx), media.lly.min(media.ury), media.llx.max(media.urx), media.lly.max(media.ury)], ..Default::default() });
         Ok(())
     }
     fn end_page(&mut self) -> Result<(), OutputError> { Ok(()) }
@@ -49,7 +50,7 @@ impl OutputDev for Collector {
         let scale = if font_size != 0.0 { size / font_size.abs() } else { 0.0 };
         let word_start = std::mem::take(&mut self.word_start);
         if self.pages.is_empty() { self.pages.push(Page::default()) }
-        self.pages.last_mut().unwrap().glyphs.push(Glyph { x: trm.m31, y: trm.m32, advance: width * size + spacing * scale, size, text: text.to_string(), word_start });
+        self.pages.last_mut().unwrap().glyphs.push(Glyph { x: trm.m31, y: trm.m32, advance: width * size + spacing * scale, size, text: text.to_string(), word_start, dir: (trm.m11, trm.m12) });
         Ok(())
     }
     fn begin_word(&mut self) -> Result<(), OutputError> { self.word_start = true; Ok(()) }
@@ -158,6 +159,47 @@ fn draw(pdf: &lopdf::Document, id: lopdf::ObjectId, page: &mut Page) {
     let resources = pdf.get_page_resources(id).ok().and_then(|(own, refs)| own.or_else(|| refs.iter().find_map(|r| pdf.get_dictionary(*r).ok())));
     rules.walk(&content, resources, IDENTITY, 0);
     (page.horizontal, page.vertical, page.areas, page.image_area) = (rules.horizontal, rules.vertical, rules.areas, rules.image_area);
+}
+
+/// A page whose text runs up, down or upside down (a landscape report on a
+/// page turned with /Rotate, a table drawn sideways) is turned a quarter turn
+/// at a time until most of its letters read left to right: letters, rules and
+/// areas alike, so its lines, columns and running header are read as on
+/// screen. Which turn comes from the letters themselves, not from /Rotate,
+/// which some writers set on pages whose text already reads across.
+fn upright(page: &mut Page) {
+    let mut votes = [0usize; 4];
+    for g in page.glyphs.iter().filter(|g| !g.text.trim().is_empty()) {
+        let (dx, dy) = g.dir;
+        votes[if dx.abs() >= dy.abs() { if dx >= 0.0 { 0 } else { 2 } } else if dy > 0.0 { 1 } else { 3 }] += 1;
+    }
+    let turn = (0..4).max_by_key(|&q| votes[q]).unwrap_or(0);
+    if turn == 0 || votes[turn] * 2 <= votes.iter().sum::<usize>() { return }
+    let [x0, y0, x1, y1] = page.media;
+    // 1: lines run up, 2: upside down, 3: lines run down; each to the right.
+    let to = |x: f64, y: f64| -> (f64, f64) {
+        match turn { 1 => (y - y0, x1 - x), 2 => (x1 - x, y1 - y), _ => (y1 - y, x - x0) }
+    };
+    let (width, height) = if turn == 2 { (x1 - x0, y1 - y0) } else { (y1 - y0, x1 - x0) };
+    for g in &mut page.glyphs {
+        (g.x, g.y) = to(g.x, g.y);
+        let (dx, dy) = g.dir;
+        g.dir = match turn { 1 => (dy, -dx), 2 => (-dx, -dy), _ => (-dy, dx) };
+    }
+    let mut ends: Vec<((f64, f64), (f64, f64))> = page.horizontal.iter().map(|&(y, a, b)| ((a, y), (b, y))).collect();
+    ends.extend(page.vertical.iter().map(|&(x, a, b)| ((x, a), (x, b))));
+    let (mut horizontal, mut vertical) = (Vec::new(), Vec::new());
+    for ((ax, ay), (bx, by)) in ends {
+        let ((ax, ay), (bx, by)) = (to(ax, ay), to(bx, by));
+        if (ay - by).abs() <= SNAP { horizontal.push(((ay + by) / 2.0, ax.min(bx), ax.max(bx))) } else { vertical.push(((ax + bx) / 2.0, ay.min(by), ay.max(by))) }
+    }
+    (page.horizontal, page.vertical) = (horizontal, vertical);
+    for a in &mut page.areas {
+        let ((ax, ay), (bx, by)) = (to(a[0], a[1]), to(a[2], a[3]));
+        *a = [ax.min(bx), ay.min(by), ax.max(bx), ay.max(by)];
+    }
+    page.media = [0.0, 0.0, width, height];
+    (page.top, page.bottom) = (height, 0.0);
 }
 
 /// Points within which two lines are the same line (a border drawn twice,
@@ -344,12 +386,17 @@ fn line_spacing(block: &[Line]) -> f64 {
 fn streams(page: &Page, taken: &HashSet<usize>) -> (Vec<Grid>, bool) {
     let lines = text_lines(page, taken);
     // Lines of one table are at most four letters apart (a shaded header
-    // stands further from its first row than lines of text do).
-    let near = |a: &Line, b: &Line| a.y - b.y <= 4.0 * a.size.max(b.size);
+    // stands further from its first row than lines of text do) and of one
+    // letter size: a heading or a paragraph in letters of another size, or the
+    // caption of the next table, starts something else. Without that, short
+    // lines between two tables keep the lanes of both open and the first table
+    // takes the second.
+    let captions: Vec<bool> = lines.iter().map(|l| caption(&line_text(page, l, f64::MIN, f64::MAX))).collect();
+    let near = |a: &Line, b: &Line| a.y - b.y <= 4.0 * a.size.max(b.size) && (a.size - b.size).abs() <= a.size.min(b.size) * 0.1;
     // From line `i`, the lines before `end` that keep at least `least` lanes open.
     let grow = |i: usize, end: usize, least: usize| {
         let mut j = i + 1;
-        while j < end && near(&lines[j - 1], &lines[j]) && lanes(&lines[i..=j]).len() >= least { j += 1 }
+        while j < end && near(&lines[j - 1], &lines[j]) && !captions[j] && lanes(&lines[i..=j]).len() >= least { j += 1 }
         j
     };
     let (mut out, mut doubtful) = (Vec::new(), false);
@@ -375,7 +422,7 @@ fn streams(page: &Page, taken: &HashSet<usize>) -> (Vec<Grid>, bool) {
             // Lines just above at the table's own spacing that keep every lane
             // open belong to it (header cells that start higher than others).
             let spacing = line_spacing(&lines[i..j]);
-            while i > floor && lines[i - 1].y - lines[i].y <= spacing * 1.3 && lanes(&lines[i - 1..j]).len() == open.len() { i -= 1 }
+            while i > floor && !captions[i] && near(&lines[i - 1], &lines[i]) && lines[i - 1].y - lines[i].y <= spacing * 1.3 && lanes(&lines[i - 1..j]).len() == open.len() { i -= 1 }
             match stream_table(page, &lines[i..j], &lanes(&lines[i..j]), false) {
                 Some(grid) => { out.push(grid); used.push((i, j)); i = j; floor = j; continue }
                 None => doubtful |= j - i >= 3,
@@ -393,15 +440,35 @@ fn streams(page: &Page, taken: &HashSet<usize>) -> (Vec<Grid>, bool) {
         let mut i = a;
         while i < b {
             let k = grow(i, b, 1);
-            if k - i < 3 { i += 1; continue }
+            // Two lines are enough when rules close them (a header and one row
+            // at the foot of a page); unruled, three lines are the least that
+            // may only look like a table.
+            if k - i < 2 { i += 1; continue }
             match stream_table(page, &lines[i..k], &lanes(&lines[i..k]), true) {
                 Some(grid) => out.push(grid),
+                None if k - i < 3 => { i += 1; continue }
                 None => doubtful = doubtful || two_columns(page, &lines[i..k]),
             }
             i = k;
         }
     }
     (out, doubtful)
+}
+
+/// A caption: a word for table or figure and its number at the start of a
+/// line, the number ending in ":" or "." or followed by a dash ("Table 12:",
+/// "Table 8–34: …", "Tabla 3. …", "Figure 7 – …").
+fn caption(text: &str) -> bool {
+    let mut words = text.split_whitespace();
+    let (Some(word), Some(number)) = (words.next(), words.next()) else { return false };
+    let named = ["table", "tabla", "tableau", "figure", "figura", "cuadro", "exhibit"].contains(&word.to_lowercase().as_str());
+    let numbered = number.starts_with(|c: char| c.is_ascii_digit());
+    named && numbered && (number.ends_with([':', '.']) || words.next().is_some_and(|w| matches!(w, ":" | "–" | "—" | "-")))
+}
+
+/// A figure's caption ("Figure 3: …"): a caption, but of no table.
+fn figure(text: &str) -> bool {
+    text.split_whitespace().next().is_some_and(|w| ["figure", "figura", "exhibit"].contains(&w.to_lowercase().as_str()))
 }
 
 /// A list's mark: a bullet ("•", "o", "–"), a short number or letter ending
@@ -448,7 +515,11 @@ fn stream_table(page: &Page, block: &[Line], lanes: &[(f64, f64)], ruled_only: b
     if let Some(first) = edges.iter().position(|&e| e) {
         if block[..first].iter().all(|l| columns_used(l, lanes) <= 1) { from = first }
     }
-    let ruled = edges[from + 1..].iter().filter(|&&e| e).count();
+    // The rule that closes the table under its last line divides rows too: a
+    // header and one row of two lines have one rule between them and one below.
+    let last = block.last().unwrap();
+    let closed = page.horizontal.iter().any(|h| h.1 < right && h.2 > left && h.0 < last.y && h.0 > last.y - last.size * 2.0);
+    let ruled = edges[from + 1..].iter().filter(|&&e| e).count() + usize::from(closed && edges[from + 1..].iter().any(|&e| e));
     if ruled_only && ruled < 2 { return None }
     let mut rows: Vec<Vec<usize>> = Vec::new();
     for (k, line) in block.iter().enumerate().skip(from) {
@@ -536,12 +607,14 @@ fn cell_text(page: &Page, glyphs: &[usize], left: f64, right: f64) -> String {
 }
 
 /// Running text of a page in drawing order (the order pdf-extract's own
-/// plain text uses), with the tables' characters replaced by a reference.
-fn page_text(page: &Page, table_of: &HashMap<usize, usize>) -> String {
+/// plain text uses), with the tables' characters replaced by a reference and
+/// the `hidden` ones (the running header and footer) left out.
+fn page_text(page: &Page, table_of: &HashMap<usize, usize>, hidden: &HashSet<usize>) -> String {
     let mut out = String::new();
     let (mut last_y, mut last_end, mut first) = (0.0f64, 0.0f64, true);
     let mut placed = HashSet::new();
     for (g, glyph) in page.glyphs.iter().enumerate() {
+        if hidden.contains(&g) { continue }
         if let Some(&t) = table_of.get(&g) {
             if placed.insert(t) { out.push_str(&format!("\n\n[Tabla T{:02} → tablas/T{:02}.csv]\n\n", t + 1, t + 1)); first = true }
             continue;
@@ -589,7 +662,7 @@ fn running_band(page: &Page, neighbors: &[&HashSet<(i64, String)>]) -> HashSet<u
         gs.sort_by(|a, b| a.x.total_cmp(&b.x));
         let text: String = gs.iter().map(|g| g.text.as_str()).collect();
         let key = band_key(&text);
-        if key.is_empty() { return text.chars().filter(|c| !c.is_whitespace()).count() <= 4 }
+        if key.is_empty() { return page_number(&text) }
         neighbors.iter().any(|n| n.contains(&(*y, key.clone())))
     };
     // Next to them, at the spacing of their lines, the line of the band that
@@ -601,6 +674,15 @@ fn running_band(page: &Page, neighbors: &[&HashSet<(i64, String)>]) -> HashSet<u
     let mut bottom = lines.iter().rev().take(lines.len() - top).take_while(|l| running(l)).count();
     while bottom > 0 && bottom < lines.len() - top && close(&lines[lines.len() - bottom], &lines[lines.len() - bottom - 1]) { bottom += 1 }
     lines[..top].iter().chain(&lines[lines.len() - bottom..]).flat_map(|(_, gs)| gs.iter().copied()).collect()
+}
+
+/// A page number alone: up to four digits or Roman numerals, perhaps between
+/// dashes ("12", "- 3 -", "iv"). A single letter is not one: on a page set
+/// sideways every letter is a line of its own.
+fn page_number(text: &str) -> bool {
+    let marks: Vec<char> = text.chars().filter(|c| !c.is_whitespace() && !matches!(c, '-' | '–' | '—' | '.' | '/')).collect();
+    !marks.is_empty() && marks.len() <= 4
+        && (marks.iter().all(char::is_ascii_digit) || marks.iter().all(|c| "ivxlcIVXLC".contains(*c)) && marks.len() > 1)
 }
 
 /// A line's words for comparing running headers: no numbers, no short words,
@@ -660,7 +742,7 @@ pub fn extract(bytes: &[u8]) -> Result<Document, String> {
             collector.pages.push(Page::default());
             unreadable.push(*n);
         }
-        if let Some(page) = collector.pages.last_mut() { draw(&pdf, page_ids[n], page) }
+        if let Some(page) = collector.pages.last_mut() { draw(&pdf, page_ids[n], page); upright(page) }
     }
     if !unreadable.is_empty() { doc.notes.push(format!("Páginas que no se pudieron leer: {unreadable:?}.")) }
 
@@ -693,8 +775,12 @@ pub fn extract(bytes: &[u8]) -> Result<Document, String> {
         let before = i.checked_sub(1).and_then(|p| bands.get(p));
         let key_at: HashMap<i64, &String> = bands[i].iter().map(|(y, k)| (*y, k)).collect();
         let carried = |g: usize| { let y = page.glyphs[g].y.round() as i64; key_at.get(&y).is_some_and(|k| before.is_some_and(|b| !b.contains(&(y, (*k).clone())))) };
-        let taken: HashSet<usize> = found.iter().flat_map(|g| g.members.iter().copied())
-            .chain(band.iter().copied().filter(|&g| !carried(g))).collect();
+        // Those running lines also leave the page's text: the same copyright,
+        // title and page number on every page are noise in every section and
+        // every search. A line of the band that changed since the page before
+        // (the name of a new section) stays.
+        let hidden: HashSet<usize> = band.iter().copied().filter(|&g| !carried(g)).collect();
+        let taken: HashSet<usize> = found.iter().flat_map(|g| g.members.iter().copied()).chain(hidden.iter().copied()).collect();
         let free = text_lines(page, &taken);
         let mut table_of = HashMap::new();
         for (k, grid) in found.iter().enumerate() {
@@ -747,7 +833,7 @@ pub fn extract(bytes: &[u8]) -> Result<Document, String> {
             last = if k == found.len() - 1 && below_all { Some((id, grid.xs.clone(), grid.slack.clone(), grid.stream, number)) } else { None };
         }
         if found.is_empty() { last = None }
-        pages_text.push(page_text(page, &table_of));
+        pages_text.push(page_text(page, &table_of, &hidden));
     }
     if !by_alignment.is_empty() {
         doc.notes.push(format!("Tablas sin bordes leídas por la alineación de sus columnas en {}: si una celda decide algo, verifícala con la imagen de su página.", pages_list(&by_alignment)));
@@ -756,7 +842,45 @@ pub fn extract(bytes: &[u8]) -> Result<Document, String> {
         let list = pages_list(&doubtful);
         doc.notes.push(format!("{}{} parece{} tener tablas sin bordes que quedaron como texto en su sección: verifícalas con la imagen de la página (paginas/pNNN.png).", list[..1].to_uppercase(), &list[1..], if doubtful.len() == 1 { "" } else { "n" }));
     }
-    doc.check_pages = doubtful;
+    // The document's own numbering checks the tables: a caption ("Table 16:")
+    // left in the text has no CSV (its rows stayed as text), and one inside
+    // another table's cells was taken by that table. Both are named, with
+    // their page, and their pages get an image to look at.
+    let key = |text: &str| {
+        let mut words = text.split_whitespace();
+        format!("{} {}", words.next().unwrap_or("").to_lowercase(), words.next().unwrap_or("").trim_end_matches([':', '.']))
+    };
+    let titled: HashSet<String> = doc.tables.iter().filter(|t| caption(&t.title)).map(|t| key(&t.title)).collect();
+    let mut orphans: Vec<(u32, String)> = Vec::new();
+    for (i, text) in pages_text.iter().enumerate() {
+        for line in text.lines().map(str::trim) {
+            // A list of tables names them all, with leaders to their pages.
+            if caption(line) && !figure(line) && !line.contains("....") && !titled.contains(&key(line)) { orphans.push((i as u32 + 1, line.chars().take(70).collect())) }
+        }
+    }
+    let mut taken_by: Vec<u32> = Vec::new();
+    for table in &mut doc.tables {
+        let own = key(&table.title);
+        let inside: Vec<String> = table.rows.iter().flatten().flat_map(|c| c.lines()).map(str::trim).filter(|l| caption(l) && key(l) != own).map(|l| l.chars().take(70).collect()).collect();
+        if !inside.is_empty() {
+            table.check = format!("tiene dentro el título de otra tabla («{}»): puede llevar filas que no son suyas", inside.join("», «"));
+            taken_by.extend(table.pages.iter().copied());
+        }
+    }
+    if !orphans.is_empty() {
+        let shown: Vec<String> = orphans.iter().take(10).map(|(p, t)| format!("«{t}» (página {p})")).collect();
+        let more = if orphans.len() > 10 { format!(" y {} más", orphans.len() - 10) } else { String::new() };
+        let one = orphans.len() == 1;
+        doc.notes.push(format!("{} tabla{} que el documento numera {} sin CSV propio, como texto en su sección: {}{more}. {} con la imagen de su página.", orphans.len(), if one { "" } else { "s" }, if one { "quedó" } else { "quedaron" }, shown.join(", "), if one { "Verifícala" } else { "Verifícalas" }));
+    }
+    if !taken_by.is_empty() {
+        let n = doc.tables.iter().filter(|t| !t.check.is_empty()).count();
+        doc.notes.push(format!("{n} tabla{} dentro el título de otra (marcada{} con check en tablas/index.json): {} con la imagen de su página.", if n == 1 { " lleva" } else { "s llevan" }, if n == 1 { "" } else { "s" }, if n == 1 { "verifícala" } else { "verifícalas" }));
+    }
+    let mut check: Vec<u32> = doubtful.into_iter().chain(orphans.iter().map(|o| o.0)).chain(taken_by).collect();
+    check.sort();
+    check.dedup();
+    doc.check_pages = check;
 
     // A page that is mostly a picture (a scan, a photo of a page) is read by
     // OCR; its text replaces the page's own only when OCR finds more letters.
@@ -778,6 +902,23 @@ pub fn extract(bytes: &[u8]) -> Result<Document, String> {
                 }
             }
             Err(e) => doc.notes.push(format!("No se pudo leer el texto de {}, que {} ({e}): mira paginas/.", pages_list(&pictures), if pictures.len() == 1 { "es una imagen" } else { "son imágenes" })),
+        }
+    }
+    // Bookmarks below level 2 are the document's own subheadings (a field, a
+    // subfield): their line on their page becomes a Markdown heading, so a long
+    // section is read, cut in parts and searched by them. Of several lines with
+    // the title, the last (the running header above repeats it).
+    if let Ok(toc) = pdf.get_toc() {
+        let plain = |t: &str| t.split_whitespace().collect::<Vec<_>>().join(" ").to_lowercase();
+        for item in toc.toc.iter().filter(|t| t.level > 2 && t.page >= 1 && t.page as u32 <= count) {
+            let title = plain(&item.title);
+            if title.chars().count() < 3 { continue }
+            let text = &mut pages_text[item.page - 1];
+            let lines: Vec<&str> = text.lines().collect();
+            let Some(at) = lines.iter().rposition(|l| !l.starts_with('#') && plain(l) == title) else { continue };
+            let mut out: Vec<String> = lines.iter().map(|l| l.to_string()).collect();
+            out[at] = format!("{} {}", "#".repeat(item.level.min(6)), out[at].trim());
+            *text = out.join("\n");
         }
     }
     let text_of = |from: u32, to: u32| -> String {
@@ -825,4 +966,23 @@ pub fn extract(bytes: &[u8]) -> Result<Document, String> {
         }
     }
     Ok(doc)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_page_number_is_digits_or_roman_numerals_never_a_lone_letter() {
+        for yes in ["12", "- 3 -", "1088", "iv", "XII"] { assert!(page_number(yes), "{yes:?}") }
+        // On a page set sideways each letter is a line of its own in the margin.
+        for no in ["R", "e", "V S", "ab", "12345", ""] { assert!(!page_number(no), "{no:?}") }
+    }
+
+    #[test]
+    fn captions_name_a_table_or_figure_and_its_number() {
+        for yes in ["Table 12: Fields", "Table 8–34: Emerging Segment 6", "Tabla 3. Ciclos", "Figure 7 – Flow"] { assert!(caption(yes), "{yes:?}") }
+        for no in ["Table of contents", "Tables 1 to 4 list", "Refer to Table 12 for", "Table"] { assert!(!caption(no), "{no:?}") }
+        assert!(figure("Figure 7 – Flow") && !figure("Table 12: Fields"));
+    }
 }

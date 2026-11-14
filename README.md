@@ -60,10 +60,36 @@ tokens en toda la conversación.
 | Páginas del Word (paginado por Word) | **33 de 33** secciones en su página correcta |
 | Tablas del mismo diseño exportado a PDF | **6 258 de 6 323** celdas iguales a las del Word (99 %) |
 | Página escaneada (solo imagen, sin texto) | texto completo con el OCR del sistema |
-| Guía técnica en PDF de 2 409 páginas con tablas sin bordes | de **0** a **2 271** tablas en CSV |
-| Tablas revisadas a mano en guías PDF y diseños Word reales (sin bordes, partidas en 2 y 3 páginas) | **5 de 5** iguales |
+| Guía técnica en PDF de 2 409 páginas con tablas sin bordes | de **0** a **2 402** tablas en CSV: el **98 %** de las que la guía numera |
+| Tablas revisadas a mano en guías PDF y diseños Word reales (sin bordes, partidas en 2 y 3 páginas) | **9 de 9** iguales |
 
 <p align="center"><img src="docs/img/tablas.svg" alt="Tablas leídas en guías PDF reales: de 0 a 2 271 en una guía de 2 409 páginas sin bordes; 530 tablas completas en una guía de 940 páginas; 5 de 5 tablas revisadas a mano iguales" width="720"></p>
+
+### En 44 documentos reales (0.4.1)
+
+Un documento dice poco; estas cifras salen de convertir con la 0.4.0 y con la
+0.4.1 los mismos 44 documentos de trabajo: 27 guías técnicas en PDF (de 2 a
+3 220 páginas), 7 diseños en Word y 10 libros de Excel. Cada métrica la cuenta
+un script sobre los dos packs, y el contenido se comparó palabra por palabra.
+
+<p align="center"><img src="docs/img/corpus.svg" alt="0.4.0 contra 0.4.1 en 44 documentos reales: tablas numeradas con CSV propio de 88 % a 97 %; tablas que se comían a la siguiente de 112 a 2; palabras con letras desordenadas de 1 448 a 0; encabezados y pies repetidos de 1.72 millones a 0.08 millones de caracteres; tokens de texto de 7.7 millones a 5.2 millones" width="720"></p>
+
+| | 0.4.0 | 0.4.1 |
+|---|---:|---:|
+| Tablas que las guías numeran («Table 16:») con su CSV propio | 5 286 de 6 003 (88 %) | **5 826 de 6 003 (97 %)** |
+| Tablas que se quedaban con el título y las filas de la siguiente | 112 | **2** |
+| Palabras con letras desordenadas («sufb ield» por «subfield») | 1 448 | **0** |
+| Caracteres de encabezados y pies repetidos en el texto | 1 718 779 | **75 372** (−96 %) |
+| Tokens de texto de las 27 guías PDF | 7.7 millones | **5.2 millones** (−32 %) |
+| Subtítulos de los marcadores del PDF dentro de las secciones | 0 | **4 557** |
+| Páginas apaisadas leídas letra por letra (líneas de una sola letra, en una guía) | 191 694 | **3 994** |
+| Tablas numeradas sin CSV propio que el pack nombra con su página | ninguna | **todas** |
+| Word y Excel | | idénticos |
+| Tiempo de conversión de los 44 | 249 s | 255 s |
+
+Menos tokens no es menos contenido: lo que salió es lo que se repetía en cada
+página (el aviso de copyright, el nombre de la guía, el número de página) y el
+texto que antes salía roto. Lo que sí se leía antes se sigue leyendo.
 
 ### El paquete
 
@@ -177,12 +203,14 @@ Cómo se parte cada formato:
 | Formato | Secciones | Tablas | Además |
 |---|---|---|---|
 | Word (DOCX) | una por cada título, según los estilos del documento | CSV | página de cada sección e imagen de cada página (con Word o LibreOffice), imágenes en `figuras/`, listas con su nivel, encabezados y pies |
-| PDF | según los marcadores del PDF; si no tiene, una por página | CSV, con o sin bordes, aunque sigan en las páginas siguientes | OCR en las páginas escaneadas, imagen de cada página, índice de contenido marcado |
+| PDF | según los marcadores del PDF; si no tiene, una por página. Los marcadores más finos (un campo, un subcampo) quedan como subtítulos `###` dentro de la sección | CSV, con o sin bordes, aunque sigan en las páginas siguientes | OCR en las páginas escaneadas, imagen de cada página, índice de contenido marcado, páginas apaisadas enderezadas, sin el encabezado y el pie que se repiten |
 | Excel (XLSX, XLS, XLSB, ODS) | una por hoja | un CSV por hoja | las fórmulas sin valor guardado se muestran como fórmula |
 | PowerPoint (PPTX) | una por diapositiva, en el orden de la presentación | CSV | número de diapositiva |
 
 Una sección muy larga viene dividida en partes de unos 2 000 tokens con sus
-números de línea, para que Claude lea solo el tramo que importa.
+números de línea, para que Claude lea solo el tramo que importa. Si la sección
+tiene subtítulos, las partes empiezan en ellos y cada una dice cuál es: «PDS
+0158 (Business Activity)» en lugar de una frase suelta.
 
 Cómo se sacan las partes que el archivo no trae escritas:
 
@@ -198,9 +226,21 @@ Cómo se sacan las partes que el archivo no trae escritas:
   bajan por todas sus líneas (un párrafo los cierra enseguida), las reglas
   entre filas si las hay, y celdas de varias líneas. Una tabla que sigue en la
   página siguiente se une en un solo CSV aunque cambie el encabezado de la
-  página o repita su título. Cada tabla lleva su título (el pie o la línea de
-  encima), su encabezado y sus páginas. Su texto va al CSV y no se repite en
-  la sección.
+  página o repita su título. Una tabla termina donde empieza un subtítulo o el
+  título de la siguiente («Table 17:»), así que nunca se queda con las filas de
+  otra. Cada tabla lleva su título (el pie o la línea de encima), su encabezado
+  y sus páginas. Su texto va al CSV y no se repite en la sección.
+- **El propio documento revisa las tablas.** Si el documento numera sus
+  tablas, DocPack cuenta cada «Table N:» contra los CSV: la que quedó como
+  texto se nombra en `manifest.json` con su página, y la que lleva el título de
+  otra dentro se marca con `check` en `tablas/index.json`. Esas páginas llevan
+  su imagen para verlas antes de citar una celda.
+- **Encabezados y pies.** Lo que se repite en el margen de cada página (el
+  copyright, el nombre de la guía, el número de página) sale del texto, y la
+  línea del encabezado que cambia (el tema que empieza) se queda.
+- **Páginas apaisadas.** Un reporte girado dentro de una página vertical se
+  endereza según hacia dónde corren sus letras, y se lee de izquierda a derecha
+  con sus columnas.
 - **Páginas escaneadas.** Una página que es sobre todo una imagen pasa por el
   OCR del sistema. Su texto queda marcado como OCR en la sección
   (`<!-- página 3 · texto por OCR -->`) y `manifest.json` dice qué motor lo
@@ -209,7 +249,8 @@ Cómo se sacan las partes que el archivo no trae escritas:
 Lo que hay que tener en cuenta (y el pack lo avisa cuando aplica):
 
 - Las tablas sin bordes se leen por la alineación de su texto: el pack dice en
-  qué páginas. Si una página parece tabla pero no se pudo leer como tal, queda
+  qué páginas. Si el documento numera sus tablas, el pack también nombra las
+  que no quedaron en su CSV. Si una página parece tabla pero no se pudo leer como tal, queda
   como texto y su imagen va en `paginas/` aunque el pack no lleve imágenes,
   para verla antes de citar una celda.
 - El OCR puede equivocarse en letras o números; para un dato crítico, pide ver
@@ -274,6 +315,8 @@ vez que se lee. Lo que cambió en cada versión está en
 engine/                 el motor: biblioteca y comando docpack (Rust)
   src/lib.rs            convierte y arma el pack, sin saber nada de ningún agente
   src/claude_code.rs    el único archivo que conoce el protocolo de Claude Code
+  vendor/pdf-extract/   pdf-extract 0.12.1 (MIT) con la lectura de anchos de
+                        fuente corregida: ver engine/Cargo.toml
 plugins/
   claude-code/          el plugin de Claude Code: hook, skill, bin/ (lanzador y
                         ejecutable de Windows) y native/ (Linux y macOS)

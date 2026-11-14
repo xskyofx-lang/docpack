@@ -1,5 +1,36 @@
 # Cambios
 
+## 0.4.1
+
+Medido sobre 44 documentos reales contra la 0.4.0 (detalle en el README).
+
+- Letras en su lugar: pdf-extract 0.12.1 leía mal los anchos de las fuentes
+  CID escritos como rango (`inicio fin ancho`) y esas letras quedaban con ancho
+  0, unas encima de otras. Salían palabras como «sufb ield» y columnas falsas
+  que partían tablas. Va su código en `engine/vendor/pdf-extract` con esa
+  función corregida: 1 448 palabras desordenadas → 0.
+- Una tabla sin bordes termina donde empieza un subtítulo (letra de otro
+  tamaño) o el título de otra tabla («Table 17:»): ya no se queda con las
+  filas de la siguiente (112 → 2).
+- La regla que cierra una tabla cuenta para separar sus filas: una celda de
+  dos líneas ya no se parte en dos filas, y una tabla de encabezado y una fila
+  entre reglas se lee como tabla.
+- Autoverificación: las tablas que el documento numera y no quedaron en su
+  CSV se nombran en `manifest.json` con su página, y la que lleva dentro el
+  título de otra se marca con `check` en `tablas/index.json`; sus páginas
+  llevan imagen. Tablas numeradas con CSV propio: 88 % → 97 %.
+- El encabezado y el pie que se repiten en cada página salen del texto; la
+  línea del encabezado que cambia se queda. Tokens de texto de las guías PDF:
+  −32 %.
+- Páginas apaisadas (un reporte girado en una página vertical) se enderezan
+  según hacia dónde corren sus letras: se leen por líneas y columnas en vez de
+  letra por letra.
+- Los marcadores más finos del PDF (niveles 3 a 5: un campo, un subcampo) son
+  subtítulos `###` en la sección, y las partes de una sección larga empiezan
+  en ellos y los usan como pista.
+- Un número de página suelto son dígitos o números romanos, nunca una letra
+  sola.
+
 ## 0.4.0
 
 - Tablas sin bordes en PDF: se leen por los carriles en blanco entre sus

@@ -20,10 +20,15 @@ version and date.
    - Then only the `secciones/*.md` the question needs, and of them only the
      tables (`tablas/Tnn.csv`) and figures they reference. `tablas/index.json`
      gives each table's title, header, page (and `pages` when it goes on across
-     pages), so you can pick a table without opening it.
-   - A long section lists `parts` (line ranges with their first line) and, when
-     its lists have groups, an `outline` with lines: read just that part with
-     Read `offset`/`limit` instead of the whole section.
+     pages), so you can pick a table without opening it. A table with a
+     `check` field holds another table's caption among its cells: compare it
+     with its page image before quoting it.
+   - A long section lists `parts` (line ranges with their first line, or the
+     first subheading they hold) and, when its lists have groups, an `outline`
+     with lines: read just that part with Read `offset`/`limit` instead of the
+     whole section. PDF subheadings from the document's bookmarks are Markdown
+     headings (`###`) in the section, so a field or subfield can be found with
+     a search for its heading.
    - A table marked `"read"` in `tablas/index.json` is data (thousands of
      rows): filter or summarize its CSV with a script; do not read it whole.
    - `paginas/pNNN.png` only when you must see a figure or a layout.
@@ -52,8 +57,9 @@ version and date.
    pack was made and what it could not do: which engine paginated a Word
    document, which pages were read by OCR, which tables were read by the
    alignment of their columns (no borders), which pages look like tables that
-   stayed as text (their image is in `paginas/` even without page images: look
-   at it before quoting a cell), a missing engine. Text marked `texto por OCR`
+   stayed as text, which numbered tables ("Table 16:") have no CSV of their own
+   (their image is in `paginas/` even without page images: look at it before
+   quoting a cell), a missing engine. Text marked `texto por OCR`
    may have recognition errors. Do not present a doubtful extraction as exact.
 
 ## Building and checking packs
