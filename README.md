@@ -9,8 +9,8 @@ computadora** en una carpeta ordenada por partes. Claude abre primero un índice
 pequeño, ve qué secciones y tablas hay y cuánto pesa cada una, y lee solo lo
 que necesita para responder.
 
-Además **conserva los colores con que el documento marca las cosas**: la IRD
-en rojo que no aplica, la fila gris que no entra en la primera entrega, «solo
+Además **conserva los colores con que el documento marca las cosas**: el perro
+remarcado en rojo, la fila gris que no entra en la primera entrega, «solo
 se prueba lo rosa». El pack trae la leyenda de colores del documento y el
 color de cada celda y de cada palabra marcada, así que puedes preguntar por
 color (`docpack find --color rosa`) en Word y en PDF.
@@ -86,7 +86,7 @@ páginas, el índice pesa la mitad del documento.
 | Página escaneada (solo imagen, sin texto) | texto completo con el OCR del sistema |
 | Guía técnica en PDF de 2 409 páginas con tablas sin bordes | de **0** a **2 402** tablas en CSV: el **98 %** de las que la guía numera |
 | Tablas revisadas a mano en guías PDF y diseños Word reales (sin bordes, partidas en 2 y 3 páginas) | **9 de 9** iguales |
-| Colores: IRD marcadas en rojo en un diseño técnico real | **670** pedazos en rojo, los mismos en el Word y en su PDF |
+| Colores: texto marcado en rojo en un diseño técnico real | **670** pedazos en rojo, los mismos en el Word y en su PDF |
 | Colores: filas en gris (campos fuera de la primera entrega) en otro diseño | **382** celdas, con sus filas exactas |
 
 <p align="center"><img src="docs/img/tablas.svg" alt="Tablas leídas en guías PDF reales: de 0 a 2 271 en una guía de 2 409 páginas sin bordes; 530 tablas completas en una guía de 940 páginas; 5 de 5 tablas revisadas a mano iguales" width="720"></p>
@@ -314,10 +314,10 @@ Cómo se sacan las partes que el archivo no trae escritas:
   página (un pie de página de lado, una etiqueta en el margen) se leen aparte,
   en su propia dirección.
 - **Listas dentro de una celda.** Una viñeta o un guion pegado a su texto es
-  sangría, no una columna: la tabla de criterios con una lista de MCC en una
-  celda sigue siendo una tabla de dos columnas.
-- **Colores.** Cuando un documento marca cosas con color (la IRD en rojo que
-  no aplica, la fila gris que no entra en la primera entrega, «solo se prueba
+  sangría, no una columna: una tabla de criterios con una lista de códigos en
+  una celda sigue siendo una tabla de dos columnas.
+- **Colores.** Cuando un documento marca cosas con color (el perro remarcado
+  en rojo, la fila gris que no entra en la primera entrega, «solo se prueba
   lo rosa»), el pack lo conserva. `manifest.json` trae la leyenda: cada color
   con su nombre (rojo, rosa, morado, gris…), su valor, si es de texto, de
   fondo o resaltado, cuántas veces aparece y ejemplos. `tablas/Tnn.colores.json`
@@ -373,7 +373,7 @@ salida es un JSON con la ruta del pack y sus números.
 | `docpack catalog` | Rehace `docpack/index.json` (se actualiza solo con cada pack) |
 
 Todos aceptan `--project <carpeta>`. Un archivo `.docpackignore` en el proyecto
-(un patrón por línea, por ejemplo `control_auditoria_*.xls`) deja fuera los
+(un patrón por línea, por ejemplo `exportacion_*.xls`) deja fuera los
 archivos de datos que no tiene caso convertir.
 
 ## Actualizaciones

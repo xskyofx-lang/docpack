@@ -1,5 +1,5 @@
-//! Colors a document uses to mark things (an IRD in red that does not apply,
-//! a gray row that is not delivered yet): which ones are marks, their name,
+//! Colors a document uses to mark things (the dogs in red, a gray row that
+//! is not delivered yet): which ones are marks, their name,
 //! and the legend of a document. A color is kept as its hex value ("FF0000")
 //! and named by its hue, so "the pink ones" can be found whatever pink a
 //! writer chose.

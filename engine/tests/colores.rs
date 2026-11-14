@@ -1,5 +1,5 @@
-//! Colors a document marks things with: an IRD in red that does not apply, a
-//! gray row not delivered yet, a pink "test this". Kept beside the plain text
+//! Colors a document marks things with: the dogs in red (vaccinated), a gray
+//! header, a pink "check this". Kept beside the plain text
 //! (the CSV does not change) and named, so "the pink ones" can be asked for.
 use docpack::{extract, CellColor};
 use std::io::Write;
@@ -33,7 +33,7 @@ fn at(colors: &[CellColor], row: usize, column: usize) -> &CellColor {
 #[test]
 fn word_keeps_the_color_of_each_piece_and_of_each_cell() {
     let styles = r#"<w:style w:type="paragraph" w:default="1" w:styleId="Normal"><w:name w:val="Normal"/></w:style>
-        <w:style w:type="character" w:styleId="NoAplica"><w:name w:val="No aplica"/><w:rPr><w:color w:val="C00000"/></w:rPr></w:style>
+        <w:style w:type="character" w:styleId="Vencida"><w:name w:val="Vencida"/><w:rPr><w:color w:val="C00000"/></w:rPr></w:style>
         <w:style w:type="paragraph" w:styleId="Heading1"><w:name w:val="heading 1"/><w:rPr><w:color w:val="0F243E"/></w:rPr></w:style>"#;
     let red = r#"<w:color w:val="FF0000"/>"#;
     let body = format!(
@@ -45,22 +45,22 @@ fn word_keeps_the_color_of_each_piece_and_of_each_cell() {
           <w:tr>{}{}</w:tr>
         </w:tbl>"#,
         run("Alcance", ""),
-        run("Las IRD en ", ""), run("rojo", red), run(" no aplican; las ", ""),
-        cell(Some("BFBFBF"), &run("Producto", "")), cell(Some("BFBFBF"), &run("IRD", "")),
-        cell(None, &run("MCI", "")), cell(None, &format!("{}{}{}", run("20, ", red), run("2A, ", ""), run("MS", r#"<w:rStyle w:val="NoAplica"/>"#))),
-        cell(Some("auto"), &run("SPE", "")), cell(None, &run("Probar", r#"<w:highlight w:val="magenta"/>"#)),
+        run("Los perros en ", ""), run("rojo", red), run(" ya están vacunados; los ", ""),
+        cell(Some("BFBFBF"), &run("Mascota", "")), cell(Some("BFBFBF"), &run("Vacunas", "")),
+        cell(None, &run("Perro", "")), cell(None, &format!("{}{}{}", run("rabia, ", red), run("tos, ", ""), run("moquillo", r#"<w:rStyle w:val="Vencida"/>"#))),
+        cell(Some("auto"), &run("Gato", "")), cell(None, &run("Revisar", r#"<w:highlight w:val="magenta"/>"#)),
     );
     let doc = extract(&docx(styles, &body), "docx").unwrap();
     let all = text(&doc);
-    assert!(all.contains(r#"Las IRD en <span style="color:#FF0000">rojo</span> no aplican"#), "{all}");
+    assert!(all.contains(r#"Los perros en <span style="color:#FF0000">rojo</span> ya están vacunados"#), "{all}");
     assert!(!all.contains("0F243E"), "a heading in the document's navy is its style, not a mark: {all}");
 
     let t = &doc.tables[0];
-    assert_eq!(t.rows[1], vec!["MCI", "20, 2A, MS"], "the CSV keeps the plain text");
+    assert_eq!(t.rows[1], vec!["Perro", "rabia, tos, moquillo"], "the CSV keeps the plain text");
     assert_eq!(at(&t.colors, 0, 0).fill.as_deref(), Some("BFBFBF"));
-    let ird = &at(&t.colors, 1, 1).text;
-    assert_eq!(ird.iter().map(|m| (m.text.as_str(), m.color.as_deref())).collect::<Vec<_>>(), vec![("20,", Some("FF0000")), ("MS", Some("C00000"))],
-        "red pieces, from the run and from its character style; 2A stays black");
+    let vaccines = &at(&t.colors, 1, 1).text;
+    assert_eq!(vaccines.iter().map(|m| (m.text.as_str(), m.color.as_deref())).collect::<Vec<_>>(), vec![("rabia,", Some("FF0000")), ("moquillo", Some("C00000"))],
+        "red pieces, from the run and from its character style; tos stays black");
     assert_eq!(at(&t.colors, 2, 1).text[0].fill.as_deref(), Some("FF00FF"), "a highlight");
     assert!(!t.colors.iter().any(|c| c.row == 2 && c.column == 0), "auto is no fill");
 
@@ -73,15 +73,15 @@ fn word_keeps_the_color_of_each_piece_and_of_each_cell() {
 fn pdf_keeps_the_color_of_each_letter_and_the_fill_behind_a_cell() {
     let doc = extract(include_bytes!("fixtures/colores.pdf"), "pdf").unwrap();
     let all = text(&doc);
-    assert!(all.contains(r#"Las IRD en <span style="color:#FF0000">rojo</span> no aplican"#), "{all}");
-    assert!(all.contains("Tabla 1: Tasas del anuncio") && !all.contains("E66E1E"), "a heading all in orange is a style: {all}");
+    assert!(all.contains(r#"Los perros en <span style="color:#FF0000">rojo</span> ya están vacunados"#), "{all}");
+    assert!(all.contains("Tabla 1: Vacunas por mascota") && !all.contains("E66E1E"), "a heading all in orange is a style: {all}");
 
     let t = &doc.tables[0];
-    assert_eq!(t.rows, vec![vec!["Producto", "IRD"], vec!["MCI", "20, MS, YB, YE"], vec!["SPE", "Pendiente"]]);
+    assert_eq!(t.rows, vec![vec!["Mascota", "Vacunas"], vec!["Perro", "rabia, moquillo, tos, parvovirus"], vec!["Gato", "Pendiente"]]);
     assert_eq!(at(&t.colors, 0, 1).fill.as_deref(), Some("BFBFBF"), "gray header");
-    let ird = &at(&t.colors, 1, 1).text;
-    assert_eq!(ird.len(), 1, "{ird:?}");
-    assert!(ird[0].text.starts_with("20, MS") && ird[0].color.as_deref() == Some("FF0000"), "only 20 and MS are red: {ird:?}");
+    let vaccines = &at(&t.colors, 1, 1).text;
+    assert_eq!(vaccines.len(), 1, "{vaccines:?}");
+    assert!(vaccines[0].text.starts_with("rabia, moquillo") && vaccines[0].color.as_deref() == Some("FF0000"), "only rabia and moquillo are red: {vaccines:?}");
     let pending = at(&t.colors, 2, 1);
     assert_eq!((pending.fill.as_deref(), pending.text[0].color.as_deref()), (Some("FFFF00"), Some("FF69B4")));
     assert_eq!(docpack::color::name("FF69B4"), "rosa");

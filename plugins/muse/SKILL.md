@@ -72,7 +72,7 @@ now on.
 3. **To find something across documents**, search every pack at once instead
    of opening them one by one:
    ```bash
-   docpack find "clearing cycle 6"
+   docpack find "vacuna antirrábica"
    ```
    Each hit names its pack, section (or table and row), part, page and line.
    Hits come ranked: the words as written first, then a table's title, a

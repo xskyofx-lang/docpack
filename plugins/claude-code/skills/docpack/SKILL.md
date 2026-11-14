@@ -63,7 +63,7 @@ version and date.
 3. **To find something across documents**, search every pack at once instead
    of opening them one by one:
    ```bash
-   docpack find "clearing cycle 6" --project "<project folder>"
+   docpack find "vacuna antirrábica" --project "<project folder>"
    ```
    Each hit names its pack, section (or table and row), part, page and line.
    Hits come ranked: the words as written first, then a table's title, a
@@ -109,7 +109,7 @@ docpack doctor --project "<project folder>"
 
 lists unfinished packs, packs whose document changed or is gone, files in
 `docpack/` that are not packs, and documents without a pack. Files named in the
-project's `.docpackignore` (one pattern per line, such as `control_auditoria_*.xls`)
+project's `.docpackignore` (one pattern per line, such as `exportacion_*.xls`)
 get no pack and are read as they are.
 
 ## What a pack contains

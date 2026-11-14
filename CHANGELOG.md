@@ -16,8 +16,8 @@
 
 Medido sobre los mismos 44 documentos reales contra la 0.4.1.
 
-- Colores: cuando un documento marca cosas con color (una IRD en rojo que no
-  aplica, una fila gris que no entra en la primera entrega), el pack lo
+- Colores: cuando un documento marca cosas con color (el perro remarcado en
+  rojo, una fila gris que no entra en la primera entrega), el pack lo
   conserva. `manifest.json` → `colores` es la leyenda (nombre en español,
   valor, si es texto, fondo o resaltado, veces y ejemplos);
   `tablas/Tnn.colores.json` da el fondo de cada celda y los pedazos de su
@@ -26,7 +26,8 @@ Medido sobre los mismos 44 documentos reales contra la 0.4.1.
   el resaltado; en PDF, del color de cada letra y del relleno detrás de cada
   celda. El color del cuerpo sale del documento y no se marca; tampoco una
   línea toda de un color (un título), una viñeta suelta ni un hipervínculo.
-  En un diseño real: 670 IRD en rojo, las mismas en su Word y en su PDF.
+  En un diseño técnico real: 670 pedazos en rojo, los mismos en su Word y
+  en su PDF.
 - `pdf-extract` (vendor/): los operadores de color `g`, `rg` y `k` ya fijan
   el color de relleno, y el texto avisa con qué color se pinta.
 - `docpack find`: lo escrito tal cual primero y, dentro, el título de una

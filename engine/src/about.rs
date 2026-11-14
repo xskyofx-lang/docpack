@@ -106,9 +106,9 @@ mod tests {
     use super::*;
     #[test]
     fn versions_and_dates_from_names() {
-        assert_eq!(version("GP_DT_01_EGBBC25001_BBVA_Colombia_VISA_v1.4.docx").as_deref(), Some("1.4"));
-        assert_eq!(version("Streaming Transaccional BBVA_Col_V1.8.doc.docx").as_deref(), Some("1.8"));
-        assert_eq!(version("Layout XML_desc Colombia V1.9_act11.xlsx").as_deref(), Some("1.9"));
+        assert_eq!(version("DT_01_Pagos_Servicio_v1.4.docx").as_deref(), Some("1.4"));
+        assert_eq!(version("Especificacion Servicio_V1.8.doc.docx").as_deref(), Some("1.8"));
+        assert_eq!(version("Layout XML_desc V1.9_act11.xlsx").as_deref(), Some("1.9"));
         assert_eq!(version("servicio.pdf"), None);
         assert_eq!(iso_date("m_SMS_Guide_en-us-2026-08-25.pdf").as_deref(), Some("2026-08-25"));
         assert_eq!(iso_date("acta 2026-13-01.pdf"), None);

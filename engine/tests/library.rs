@@ -163,15 +163,15 @@ fn find_filters_by_pack_by_kind_and_by_color() {
     let hits = pink["hits"].as_array().unwrap();
     assert_eq!(hits.len(), 1, "{pink}");
     assert_eq!((hits[0]["table"].as_str(), hits[0]["row"].as_u64(), hits[0]["colores"][0]["texto"][0].as_str()), (Some("T01"), Some(3), Some("Pendiente")));
-    // Red: the IRDs in the table and the word in the text; by value as well as by name.
+    // Red: the vaccines in the table and the word in the text; by value as well as by name.
     let red = find("", library::Find { color: Some("FF0000".into()), ..Default::default() });
     let red: Vec<&Value> = red["hits"].as_array().unwrap().iter().collect();
-    assert!(red.iter().any(|h| h["table"] == "T01" && h["colores"][0]["texto"][0].as_str().unwrap().starts_with("20, MS")), "{red:?}");
-    assert!(red.iter().any(|h| h["section"].is_string() && h["text"].as_str().unwrap().contains("Las IRD en rojo")), "the text without its tags: {red:?}");
+    assert!(red.iter().any(|h| h["table"] == "T01" && h["colores"][0]["texto"][0].as_str().unwrap().starts_with("rabia, moquillo")), "{red:?}");
+    assert!(red.iter().any(|h| h["section"].is_string() && h["text"].as_str().unwrap().contains("Los perros en rojo")), "the text without its tags: {red:?}");
     // Only tables, only one pack.
-    let only = find("MCI", library::Find { only: Some("tablas".into()), pack: Some("colores".into()), ..Default::default() });
+    let only = find("Perro", library::Find { only: Some("tablas".into()), pack: Some("colores".into()), ..Default::default() });
     assert!(only["hits"].as_array().unwrap().iter().all(|h| h["pack"] == "colores.pdf" && h["table"].is_string()), "{only}");
-    assert!(find("MCI", library::Find { only: Some("texto".into()), ..Default::default() })["total"] == 0, "MCI is only in a table");
+    assert!(find("Gato", library::Find { only: Some("texto".into()), ..Default::default() })["total"] == 0, "Gato is only in a table");
 }
 
 #[test]

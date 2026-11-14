@@ -1213,7 +1213,7 @@ mod tests {
 
     #[test]
     fn captions_name_a_table_or_figure_and_its_number() {
-        for yes in ["Table 12: Fields", "Table 8–34: Emerging Segment 6", "Tabla 3. Ciclos", "Figure 7 – Flow"] { assert!(caption(yes), "{yes:?}") }
+        for yes in ["Table 12: Fields", "Table 8–34: Fee schedule", "Tabla 3. Ciclos", "Figure 7 – Flow"] { assert!(caption(yes), "{yes:?}") }
         for no in ["Table of contents", "Tables 1 to 4 list", "Refer to Table 12 for", "Table"] { assert!(!caption(no), "{no:?}") }
         assert!(figure("Figure 7 – Flow") && !figure("Table 12: Fields"));
     }
