@@ -3,3 +3,4 @@
 *.pdf binary
 *.png binary
 plugins/claude-code/bin/docpack text eol=lf
+*.sh text eol=lf
