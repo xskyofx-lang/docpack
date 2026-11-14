@@ -23,6 +23,8 @@
   enorme se marca para filtrarla en vez de leerla; `.docpackignore` deja fuera
   archivos por patrón.
 - Reemplazar un pack ya no deja la carpeta sin pack si algo falla a la mitad.
+- Dos construcciones del mismo documento a la vez ya no comparten carpeta
+  temporal (antes una podía borrarle la carpeta a la otra).
 
 ## 0.3.1
 
