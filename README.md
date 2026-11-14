@@ -10,7 +10,9 @@ pequeño, ve qué secciones y tablas hay y cuánto pesa cada una, y lee solo lo
 que necesita para responder.
 
 Lo hice para mi propio trabajo con diseños técnicos largos y lo comparto tal
-como lo uso.
+como lo uso. Viene integrado en [Sky Agent](https://ia.skyoflies.com) y
+funciona como plugin de Claude Code. Más en
+[ia.skyoflies.com/docpack.html](https://ia.skyoflies.com/docpack.html).
 
 — Juan Antonio Sandoval Puente · [skyoflies.com](https://skyoflies.com)
 
@@ -60,6 +62,8 @@ tokens en toda la conversación.
 | Página escaneada (solo imagen, sin texto) | texto completo con el OCR del sistema |
 | Guía técnica en PDF de 2 409 páginas con tablas sin bordes | de **0** a **2 271** tablas en CSV |
 | Tablas revisadas a mano en guías PDF y diseños Word reales (sin bordes, partidas en 2 y 3 páginas) | **5 de 5** iguales |
+
+<p align="center"><img src="docs/img/tablas.svg" alt="Tablas leídas en guías PDF reales: de 0 a 2 271 en una guía de 2 409 páginas sin bordes; 530 tablas completas en una guía de 940 páginas; 5 de 5 tablas revisadas a mano iguales" width="720"></p>
 
 ### El paquete
 
