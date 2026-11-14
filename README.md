@@ -9,33 +9,57 @@ computadora** en una carpeta ordenada por partes. Claude abre primero un índice
 pequeño, ve qué secciones y tablas hay y cuánto pesa cada una, y lee solo lo
 que necesita para responder.
 
+Además **conserva los colores con que el documento marca las cosas**: la IRD
+en rojo que no aplica, la fila gris que no entra en la primera entrega, «solo
+se prueba lo rosa». El pack trae la leyenda de colores del documento y el
+color de cada celda y de cada palabra marcada, así que puedes preguntar por
+color (`docpack find --color rosa`) en Word y en PDF.
+
 Lo hice para mi propio trabajo con diseños técnicos largos y lo comparto tal
-como lo uso. Viene integrado en [Sky Agent](https://ia.skyoflies.com) y
-funciona como plugin de Claude Code. Más en
+como lo uso. Viene integrado en [Sky Agent](https://ia.skyoflies.com),
+funciona como plugin de Claude Code y se instala en Muse. Más en
 [ia.skyoflies.com/docpack.html](https://ia.skyoflies.com/docpack.html).
 
 — Juan Antonio Sandoval Puente · [skyoflies.com](https://skyoflies.com)
 
-<p align="center"><img src="docs/img/ahorro.svg" alt="Tokens por pregunta: 88 120 leyendo el documento, 12 800 con DocPack en la primera pregunta y 3 400 en las siguientes" width="720"></p>
+<p align="center"><img src="docs/img/ahorro.svg" alt="Tokens para responder sobre 44 documentos reales: 27.8 millones leyéndolos completos (111 dólares con Claude Opus 5.5), 166 725 con DocPack en la primera pregunta (99.4 % menos) y 23 368 en las siguientes (99.9 % menos)" width="720"></p>
 
 ## Métricas
 
-Las medí con un diseño técnico real en Word: 89 tablas, 6 393 celdas, 13
-imágenes y unos 88 000 tokens si se lee entero. Primero lo leí completo, sin
-nada instalado, y después a través de DocPack, y comparé las dos lecturas.
+### Tokens: 44 documentos reales
 
-### Tokens
+Medido con los mismos 44 documentos de trabajo de las demás métricas: 27
+guías técnicas en PDF (de 2 a 3 220 páginas), 7 diseños en Word y 10 libros
+de Excel. Para cada documento:
 
-| | Sin DocPack | Con DocPack | Ahorro |
+- **Sin DocPack** es leerlo completo: todo su texto y sus tablas. Es el mínimo;
+  leer un PDF original suma además la imagen de cada página.
+- **Con DocPack, la primera pregunta** es su índice más la parte que hace falta
+  (la mediana de sus partes, secciones cortas y tablas).
+- **Cada pregunta siguiente** lee solo esa parte: el índice ya está leído.
+
+Los tokens son la estimación que trae cada pack (dentro de un 1.4 % de lo
+medido en un diseño en Word); los dólares, al precio de entrada de Claude
+Opus 5.5, 4 dólares por millón de tokens.
+
+| 44 documentos | Sin DocPack | Con DocPack | Ahorro |
 |---|---:|---:|---:|
-| Primera pregunta (índice + la sección que hacía falta) | ~88 120 | ~12 800 | **85 %** |
-| Cada pregunta siguiente | ~88 120 | ~3 400 | **96 %** |
-| Diez preguntas sobre el mismo documento | ~881 000 | ~43 400 | **95 %** |
-| Lecturas necesarias para ver el documento | 4 o más (cada lectura admite unos 25 000) | 1 o 2 | |
+| Primera pregunta en cada documento | 27.8 M tokens · $111.08 | 166 725 · $0.67 | **99.4 %** |
+| Cada pregunta siguiente | 27.8 M · $111.08 | 23 368 · $0.09 | **99.9 %** |
+| Diez preguntas en cada documento | 277.7 M · $1 110.84 | 377 037 · $1.51 | **99.9 %** |
+| Mediana por documento (1.ª pregunta · siguientes) | | | **94.9 % · 99.6 %** |
+| Documentos que no caben en una conversación (más de un millón de tokens) | 6 | 0 | |
+
+| Por tipo | Documentos | Leerlos completos | 1.ª pregunta | Ahorro | Siguientes | Ahorro |
+|---|---:|---:|---:|---:|---:|---:|
+| PDF | 27 | 11.1 M | 119 576 | 98.9 % | 17 467 | 99.8 % |
+| Word | 7 | 311 400 | 29 149 | 90.6 % | 2 144 | 99.3 % |
+| Excel | 10 | 16.3 M | 18 000 | 99.9 % | 3 757 | 99.98 % |
 
 Las diez preguntas suponen que sin DocPack el documento se vuelve a leer en
-cada una. Si sigue en el contexto no se relee, pero entonces ocupa esos 88 000
-tokens en toda la conversación.
+cada una; si sigue en el contexto no se relee, pero ocupa esos tokens en toda
+la conversación. El ahorro es menor en los documentos chicos: en uno de dos
+páginas, el índice pesa la mitad del documento.
 
 ### Velocidad
 
@@ -62,6 +86,8 @@ tokens en toda la conversación.
 | Página escaneada (solo imagen, sin texto) | texto completo con el OCR del sistema |
 | Guía técnica en PDF de 2 409 páginas con tablas sin bordes | de **0** a **2 402** tablas en CSV: el **98 %** de las que la guía numera |
 | Tablas revisadas a mano en guías PDF y diseños Word reales (sin bordes, partidas en 2 y 3 páginas) | **9 de 9** iguales |
+| Colores: IRD marcadas en rojo en un diseño técnico real | **670** pedazos en rojo, los mismos en el Word y en su PDF |
+| Colores: filas en gris (campos fuera de la primera entrega) en otro diseño | **382** celdas, con sus filas exactas |
 
 <p align="center"><img src="docs/img/tablas.svg" alt="Tablas leídas en guías PDF reales: de 0 a 2 271 en una guía de 2 409 páginas sin bordes; 530 tablas completas en una guía de 940 páginas; 5 de 5 tablas revisadas a mano iguales" width="720"></p>
 

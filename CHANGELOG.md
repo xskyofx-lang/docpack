@@ -1,5 +1,17 @@
 # Cambios
 
+## 0.4.3
+
+- Índice de verdad pequeño en documentos largos: cada sección es una línea
+  («id · páginas · tokens · tablas · partes · título») en lugar de un objeto
+  que repetía nombres de campo y la ruta del archivo; con cientos de
+  subsecciones, el índice lista los capítulos con el rango de sus
+  subsecciones y la lista completa va en `secciones/lista.txt` para buscar
+  ahí. Manual de 3 220 páginas: 155 536 → 3 903 tokens.
+- README: la métrica de tokens ahora es de los 44 documentos reales (primera
+  pregunta: 27.8 M → 166 725 tokens, 99.4 % menos; siguientes: 99.9 %) y los
+  colores se presentan desde el principio.
+
 ## 0.4.2
 
 Medido sobre los mismos 44 documentos reales contra la 0.4.1.

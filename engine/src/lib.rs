@@ -452,21 +452,61 @@ fn write_pack(dir: &Path, source: &Path, bytes: &[u8], sha: &str, mut doc: Docum
     // secciones/index.json, and the index keeps what picks a section.
     let detail_tokens = tokens_estimate(&serde_json::to_string(&section_entries).map_err(|e| e.to_string())?);
     let light = detail_tokens > PART_TOKENS * 4;
+    let mut grouped = false;
     let listed: Vec<serde_json::Value> = if light {
         std::fs::write(staging.join("secciones").join("index.json"), serde_json::to_string(&section_entries).map_err(|e| e.to_string())?).map_err(io)?;
+        // One short line per section, not an object: field names and file
+        // paths repeated for every section were most of a long index. A
+        // level-2 section is indented under its level-1.
         section_entries.iter().map(|e| {
-            let mut slim = serde_json::Map::new();
-            for key in ["id", "title", "kind", "level", "path", "page_start", "page_end", "file", "lines", "tokens_estimate"] {
-                if let Some(v) = e.get(key) { slim.insert(key.into(), v.clone()); }
+            let n = |k: &str| e.get(k).and_then(|v| v.as_u64());
+            let count = |k: &str| e.get(k).and_then(|v| v.as_array()).map_or(0, Vec::len);
+            let mut line = String::new();
+            line.push_str(&"  ".repeat(n("level").unwrap_or(1).saturating_sub(1) as usize));
+            line.push_str(e["id"].as_str().unwrap_or(""));
+            match (n("page_start"), n("page_end")) {
+                (Some(a), Some(b)) if a == b => line.push_str(&format!(" · p.{a}")),
+                (Some(a), Some(b)) => line.push_str(&format!(" · p.{a}–{b}")),
+                _ => {}
             }
-            for (key, count) in [("tables", "table_count"), ("parts", "part_count"), ("figures", "figure_count")] {
-                if let Some(n) = e.get(key).and_then(|v| v.as_array()).map(Vec::len) { slim.insert(count.into(), n.into()); }
-            }
-            serde_json::Value::Object(slim)
-        }).collect()
+            line.push_str(&format!(" · {} tok", n("tokens_estimate").unwrap_or(0)));
+            let (t, p) = (count("tables"), count("parts"));
+            if t > 0 { line.push_str(&format!(" · {t} {}", if t == 1 { "tabla" } else { "tablas" })) }
+            if p > 0 { line.push_str(&format!(" · {p} partes")) }
+            if e.get("kind").and_then(|v| v.as_str()) == Some("toc") { line.push_str(" · índice") }
+            line.push_str(" · ");
+            line.push_str(e["title"].as_str().unwrap_or(""));
+            serde_json::Value::String(line)
+        }).collect::<Vec<_>>()
     } else { section_entries.clone() };
-    let how = if light {
-        "Lee este índice para elegir la sección; su detalle (parts con líneas para leerla por partes, outline, tablas y figuras) está en secciones/index.json: busca ahí solo la sección elegida. Detalle de tablas en tablas/index.json y de figuras en figuras/index.json. paginas/pNNN.png solo para ver una página. El original solo si la persona lo pide."
+    // When even those lines cost more than a few parts (hundreds of
+    // subsections), the index lists the top level with the range of its
+    // subsections, and every line goes to secciones/lista.txt, to search.
+    let lines_tokens = tokens_estimate(&serde_json::to_string(&listed).map_err(|e| e.to_string())?);
+    let listed: Vec<serde_json::Value> = if light && lines_tokens > PART_TOKENS * 4 {
+        let all: Vec<String> = listed.iter().filter_map(|v| v.as_str().map(str::to_string)).collect();
+        std::fs::write(staging.join("secciones").join("lista.txt"), all.join("\n") + "\n").map_err(io)?;
+        let mut top: Vec<serde_json::Value> = Vec::new();
+        let mut i = 0;
+        while i < all.len() {
+            if all[i].starts_with(' ') { i += 1; continue }
+            let mut j = i + 1;
+            while j < all.len() && all[j].starts_with(' ') { j += 1 }
+            let mut line = all[i].clone();
+            if j > i + 1 {
+                let id = |l: &str| l.trim_start().split(' ').next().unwrap_or("").to_string();
+                line.push_str(&format!(" · {} subsecciones {}–{}", j - i - 1, id(&all[i + 1]), id(&all[j - 1])));
+            }
+            top.push(serde_json::Value::String(line));
+            i = j;
+        }
+        grouped = top.len() < all.len();
+        if grouped { top } else { listed }
+    } else { listed };
+    let how = if grouped {
+        "Este índice lista los capítulos; cada línea es «id · páginas · tokens · tablas · partes · título · subsecciones». La lista completa de secciones (una línea cada una) está en secciones/lista.txt: busca ahí el título con grep o usa docpack find, sin leerla entera. El archivo de la sección S491 es secciones/491-….md; su detalle (archivo, parts con líneas para leerla por partes, outline, tablas y figuras) está en secciones/index.json: busca ahí solo la sección elegida. Detalle de tablas en tablas/index.json y de figuras en figuras/index.json. El original solo si la persona lo pide."
+    } else if light {
+        "Lee este índice para elegir la sección: cada línea es «id · páginas · tokens · tablas · partes · título». El archivo de la sección S491 es secciones/491-….md; su detalle (archivo, parts con líneas para leerla por partes, outline, tablas y figuras) está en secciones/index.json: busca ahí solo la sección elegida. Detalle de tablas en tablas/index.json y de figuras en figuras/index.json. paginas/pNNN.png solo para ver una página. El original solo si la persona lo pide."
     } else {
         "Lee este índice; abre solo las secciones que necesites y, de ellas, sus tablas (tablas/Tnn.csv) y figuras. Una sección larga trae outline con líneas para leerla por partes. Detalle de tablas en tablas/index.json y de figuras en figuras/index.json. paginas/pNNN.png solo para ver una página. El original solo si la persona lo pide."
     };
@@ -477,6 +517,7 @@ fn write_pack(dir: &Path, source: &Path, bytes: &[u8], sha: &str, mut doc: Docum
         "how_to_read": how,
         "sections": listed,
         "section_detail": light.then_some("secciones/index.json"),
+        "section_list": grouped.then_some("secciones/lista.txt"),
         "tables": table_entries.len(), "figures": figure_entries.len(),
         "page_images": match (page_images.is_empty(), only) {
             (true, _) => serde_json::Value::Null,

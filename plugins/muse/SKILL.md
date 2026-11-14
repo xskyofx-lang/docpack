@@ -27,11 +27,14 @@ now on.
    XLSX. Read the pack:
    - `index.json` first: sections (with pages and an estimated token count),
      tables and page images. A section with `"kind": "toc"` is a table of
-     contents: it says where things are, not what they say. In a long
-     document the index keeps only what picks a section (`table_count`,
-     `part_count`) and `section_detail` names `secciones/index.json`, where
-     each section's `parts`, `outline`, tables and figures are: look up only
-     the section you chose.
+     contents: it says where things are, not what they say. In a long document each section is one line, «id · pages · tokens ·
+     tables · parts · title» (S491's file is `secciones/491-….md`), and
+     `section_detail` names `secciones/index.json`, where each section's
+     file, `parts`, `outline`, tables and figures are: look up only the
+     section you chose. When a document has hundreds of subsections, the
+     index lists only its top level with the range of their subsections, and
+     `section_list` names `secciones/lista.txt`, every section in one line:
+     grep it for a title (or use `docpack find`) instead of reading it whole.
    - Then only the `secciones/*.md` the question needs, and of them only the
      tables (`tablas/Tnn.csv`) and figures they reference. `tablas/index.json`
      gives each table's title, header, page (and `pages` when it goes on
