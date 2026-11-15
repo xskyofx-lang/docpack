@@ -126,6 +126,9 @@ pub struct Options {
     pub pages: bool,
     /// Rebuild even when the pack is current.
     pub force: bool,
+    /// The project was named on purpose (`--project`): the pack of a file
+    /// outside it goes in the project too, never next to the file.
+    pub in_project: bool,
 }
 
 /// The outcome of a build, as the CLI and the hook report it.
@@ -234,7 +237,13 @@ pub fn supported(path: &Path) -> bool {
 /// The folder of a document's pack: `<project>/docpack/<file name>/`. A file
 /// outside the project gets its pack next to itself.
 pub fn pack_dir(project: &Path, source: &Path) -> PathBuf {
-    let inside = match (project.canonicalize(), source.canonicalize()) {
+    pack_dir_with(project, source, &Options::default())
+}
+
+/// [`pack_dir`] as a build with these options places it: with
+/// `in_project`, a file outside the project gets its pack in the project too.
+pub fn pack_dir_with(project: &Path, source: &Path, options: &Options) -> PathBuf {
+    let inside = options.in_project || match (project.canonicalize(), source.canonicalize()) {
         (Ok(p), Ok(s)) => s.starts_with(&p),
         _ => false,
     };
@@ -296,7 +305,7 @@ pub fn build(source: &Path, project: &Path, options: &Options) -> Result<Built, 
     if !FORMATS.contains(&ext.as_str()) { return Err(format!("Formato no compatible: .{ext}")) }
     let bytes = std::fs::read(source).map_err(|e| format!("No se pudo leer {}: {e}", source.display()))?;
     let sha = sha256(&bytes);
-    let dir = pack_dir(project, source);
+    let dir = pack_dir_with(project, source, options);
     if !options.force {
         if let Some(m) = current(&dir, &sha, options) {
             return Ok(Built {

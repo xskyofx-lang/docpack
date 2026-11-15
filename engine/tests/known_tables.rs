@@ -28,7 +28,7 @@ fn known_tables_of_real_documents() {
         let pack = packs.entry(file.to_string()).or_insert_with(|| {
             let copy = work.path().join(PathBuf::from(file).file_name().unwrap());
             std::fs::copy(file, &copy).unwrap_or_else(|e| panic!("{file}: {e}"));
-            build(&copy, work.path(), &Options { pages: false, force: false }).unwrap().pack
+            build(&copy, work.path(), &Options { pages: false, force: false, in_project: false }).unwrap().pack
         }).clone();
         let tables: Vec<Value> = serde_json::from_str(&std::fs::read_to_string(pack.join("tablas/index.json")).unwrap()).unwrap();
         let page = expected["page"].as_u64().expect("page");

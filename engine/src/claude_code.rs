@@ -30,7 +30,7 @@ pub fn hook() -> i32 {
     let project = project_dir(&input);
     // A file the project's .docpackignore names is read as it is.
     if docpack::library::ignored(&project, &file) { return 0 }
-    let built = match build(&file, &project, &Options { pages: true, force: false }) {
+    let built = match build(&file, &project, &Options { pages: true, force: false, in_project: false }) {
         Ok(b) => b,
         Err(e) => { eprintln!("docpack: no se pudo crear el pack de {}: {e}", file.display()); return 0 }
     };

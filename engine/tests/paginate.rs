@@ -34,7 +34,7 @@ fn each_word_section_takes_the_page_of_its_heading() {
     let body = [heading("Alcance"), para("Texto del alcance."), PAGE_BREAK.into(), PAGE_BREAK.into(), heading("Validaciones"), para("Texto de las validaciones.")].concat();
     let src = t.path().join("diseno.docx");
     std::fs::write(&src, full_docx(&body)).unwrap();
-    let built = build(&src, t.path(), &Options { pages: true, force: true }).unwrap();
+    let built = build(&src, t.path(), &Options { pages: true, force: true, in_project: false }).unwrap();
     let manifest: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(built.pack.join("manifest.json")).unwrap()).unwrap();
     let notes = manifest["notes"].to_string();
     if notes.contains("Sin números de página") {

@@ -1,5 +1,14 @@
 # Cambios
 
+## 0.4.5
+
+- PDF con imágenes: la copia de `pdf-extract` leía los bytes de una imagen
+  como si fueran instrucciones de dibujo y el programa se caía con algunos
+  documentos. Ahora solo interpreta los objetos que de verdad traen dibujo.
+- `--project`: cuando se indica la carpeta, el pack de un archivo que está
+  fuera de ella se guarda en esa carpeta y no junto al archivo. Sin
+  `--project` (y en el plugin) todo sigue igual.
+
 ## 0.4.4
 
 - DocPack como biblioteca de otro proyecto (Sky Agent) usa también la copia

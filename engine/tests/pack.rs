@@ -1,4 +1,4 @@
-use docpack::{build, pack_dir, Options};
+use docpack::{build, pack_dir, pack_dir_with, Options};
 use std::path::Path;
 
 fn fixture(name: &str) -> std::path::PathBuf {
@@ -12,7 +12,7 @@ fn pdf_sections_follow_its_bookmarks() {
     let t = tempfile::tempdir().unwrap();
     let src = t.path().join("diseno.pdf");
     std::fs::copy(fixture("diseno.pdf"), &src).unwrap();
-    let built = build(&src, t.path(), &Options { pages: false, force: false }).unwrap();
+    let built = build(&src, t.path(), &Options { pages: false, force: false, in_project: false }).unwrap();
     assert_eq!(built.status, "built");
     assert_eq!(built.pack, t.path().join("docpack").join("diseno.pdf"));
     let index: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(&built.index).unwrap()).unwrap();
@@ -42,6 +42,18 @@ fn a_file_outside_the_project_gets_its_pack_next_to_it() {
 }
 
 #[test]
+fn a_project_named_on_purpose_keeps_the_packs_of_files_outside_it() {
+    let project = tempfile::tempdir().unwrap();
+    let elsewhere = tempfile::tempdir().unwrap();
+    let file = elsewhere.path().join("vacunas.pdf");
+    std::fs::copy(fixture("diseno.pdf"), &file).unwrap();
+    let named = Options { pages: false, force: false, in_project: true };
+    assert_eq!(pack_dir_with(project.path(), &file, &named), project.path().join("docpack").join("vacunas.pdf"));
+    assert_eq!(build(&file, project.path(), &named).unwrap().pack, project.path().join("docpack").join("vacunas.pdf"));
+    assert!(!elsewhere.path().join("docpack").exists(), "nothing is written next to the file");
+}
+
+#[test]
 fn a_folder_that_is_not_a_pack_is_never_overwritten() {
     let t = tempfile::tempdir().unwrap();
     let src = t.path().join("diseno.pdf");
@@ -60,8 +72,8 @@ fn a_pack_without_pages_is_rebuilt_when_pages_are_asked() {
     let t = tempfile::tempdir().unwrap();
     let src = t.path().join("diseno.pdf");
     std::fs::copy(fixture("diseno.pdf"), &src).unwrap();
-    let quick = Options { pages: false, force: false };
-    let full = Options { pages: true, force: false };
+    let quick = Options { pages: false, force: false, in_project: false };
+    let full = Options { pages: true, force: false, in_project: false };
     assert_eq!(build(&src, t.path(), &quick).unwrap().status, "built");
     assert_eq!(build(&src, t.path(), &quick).unwrap().status, "up_to_date");
     assert_eq!(build(&src, t.path(), &full).unwrap().status, "built", "pages were missing");

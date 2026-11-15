@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 
 fn fixture(name: &str) -> PathBuf { Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures").join(name) }
 fn json(path: &Path) -> Value { serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap() }
-const QUICK: Options = Options { pages: false, force: false };
+const QUICK: Options = Options { pages: false, force: false, in_project: false };
 
 /// A Word document with a heading, a paragraph and one table.
 fn docx(paragraph: &str, rows: &[[&str; 2]]) -> Vec<u8> {
