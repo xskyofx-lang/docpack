@@ -45,6 +45,7 @@ fn name_of(dir: &Path) -> String { dir.file_name().map(|n| n.to_string_lossy().i
 /// title, version and date, its size and how current it is. Replaces the old
 /// catalog in one step.
 pub fn write_catalog(root: &Path) -> Result<PathBuf, String> {
+    if !root.is_dir() { return Err(format!("Todavía no hay packs en {}: construye uno primero (docpack build).", root.display())) }
     let entries: Vec<Value> = packs(root).iter().map(|(dir, m)| {
         let about = &m["document"];
         crate::compact(json!({

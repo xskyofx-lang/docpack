@@ -17,7 +17,8 @@ color (`docpack find --color rosa`) en Word y en PDF.
 
 Lo hice para mi propio trabajo con diseños técnicos largos y lo comparto tal
 como lo uso. Viene integrado en [Sky Agent](https://ia.skyoflies.com),
-funciona como plugin de Claude Code y se instala en Muse. Más en
+funciona como plugin de Claude Code, se instala en Muse y, por MCP, en
+OpenAI Codex, Kimi Code, Google Antigravity y clientes de DeepSeek. Más en
 [ia.skyoflies.com/docpack.html](https://ia.skyoflies.com/docpack.html).
 
 — Juan Antonio Sandoval Puente · [skyoflies.com](https://skyoflies.com)
@@ -131,9 +132,17 @@ lo que lees, no por el documento entero.**
 
 ## Instalación
 
-DocPack funciona en **Claude Code** como plugin y en **Muse** (Meta) como
-instalación local. En los dos casos corre en tu máquina y lee tus documentos
-igual: el mismo ejecutable, el mismo pack y las mismas reglas de lectura.
+DocPack corre en tu máquina y lee tus documentos igual en todos los agentes:
+el mismo ejecutable, el mismo pack y las mismas reglas de lectura.
+
+| | Agente | Cómo se conecta | Instalación |
+|:-:|---|---|---|
+| <img src="docs/assets/agentes/claude.svg" width="32" height="32" alt="Claude"> | **Claude Code** | Plugin (hook + skill) | [Claude Code](#claude-code) |
+| <img src="docs/assets/agentes/muse.svg" width="32" height="32" alt="Muse"> | **Muse** (Meta) | Instalación local + skill | [Muse](#muse) |
+| <img src="docs/assets/agentes/codex.svg" width="32" height="32" alt="OpenAI Codex"> | **OpenAI Codex** | Servidor MCP + skill | [Codex](#openai-codex) |
+| <img src="docs/assets/agentes/kimi.svg" width="32" height="32" alt="Kimi"> | **Kimi Code** | Servidor MCP + skill | [Kimi](#kimi-code) |
+| <img src="docs/assets/agentes/antigravity.svg" width="32" height="32" alt="Google Antigravity"> | **Google Antigravity** | Servidor MCP + skill | [Antigravity](#google-antigravity) |
+| <img src="docs/assets/agentes/deepseek.svg" width="32" height="32" alt="DeepSeek"> | **DeepSeek** (DeepSeek-TUI, OpenCode, Cline…) | Servidor MCP + skill | [DeepSeek](#deepseek) |
 
 ### Claude Code
 
@@ -203,6 +212,98 @@ PowerPoint a través de su pack, no del archivo original.
 Probado en la máquina de Muse el 14 de noviembre de 2026 con un Word real.
 Los detalles del adaptador están en
 [plugins/muse/README.md](plugins/muse/README.md).
+
+### OpenAI Codex
+
+<img src="docs/assets/agentes/codex.svg" width="48" height="48" alt="OpenAI Codex">
+
+**Windows** (PowerShell):
+
+```powershell
+& ([scriptblock]::Create((irm https://raw.githubusercontent.com/xskyofx-lang/docpack/main/install/install.ps1))) -Agent codex
+```
+
+**macOS y Linux**:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/xskyofx-lang/docpack/main/install/install.sh | bash -s -- --agent codex
+```
+
+Registra el servidor con `codex mcp add` (queda en `~/.codex/config.toml`) y deja la skill en `~/.agents/skills/docpack/`. Antes de editar una configuración deja una copia `*.antes-de-docpack`.
+Reinicia el agente al terminar. Detalles en [plugins/codex/README.md](plugins/codex/README.md).
+
+### Kimi Code
+
+<img src="docs/assets/agentes/kimi.svg" width="48" height="48" alt="Kimi Code">
+
+**Windows** (PowerShell):
+
+```powershell
+& ([scriptblock]::Create((irm https://raw.githubusercontent.com/xskyofx-lang/docpack/main/install/install.ps1))) -Agent kimi
+```
+
+**macOS y Linux**:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/xskyofx-lang/docpack/main/install/install.sh | bash -s -- --agent kimi
+```
+
+Registra el servidor en `~/.kimi-code/mcp.json` y deja la skill en `~/.agents/skills/docpack/`. En Kimi, `/mcp` muestra si está conectado. Antes de editar una configuración deja una copia `*.antes-de-docpack`.
+Reinicia el agente al terminar. Detalles en [plugins/kimi/README.md](plugins/kimi/README.md).
+
+### Google Antigravity
+
+<img src="docs/assets/agentes/antigravity.svg" width="48" height="48" alt="Google Antigravity">
+
+**Windows** (PowerShell):
+
+```powershell
+& ([scriptblock]::Create((irm https://raw.githubusercontent.com/xskyofx-lang/docpack/main/install/install.ps1))) -Agent antigravity
+```
+
+**macOS y Linux**:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/xskyofx-lang/docpack/main/install/install.sh | bash -s -- --agent antigravity
+```
+
+Registra el servidor en `~/.gemini/config/mcp_config.json` (lo comparten la app, el IDE y la CLI) y deja la skill en `~/.gemini/config/skills/docpack/`. Antes de editar una configuración deja una copia `*.antes-de-docpack`.
+Reinicia el agente al terminar. Detalles en [plugins/antigravity/README.md](plugins/antigravity/README.md).
+
+### DeepSeek
+
+<img src="docs/assets/agentes/deepseek.svg" width="48" height="48" alt="DeepSeek">
+
+**Windows** (PowerShell):
+
+```powershell
+& ([scriptblock]::Create((irm https://raw.githubusercontent.com/xskyofx-lang/docpack/main/install/install.ps1))) -Agent deepseek
+```
+
+**macOS y Linux**:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/xskyofx-lang/docpack/main/install/install.sh | bash -s -- --agent deepseek
+```
+
+DeepSeek no tiene un archivo de configuración único: el instalador deja la skill en `~/.agents/skills/docpack/` y te imprime la entrada MCP exacta para pegarla en tu cliente (DeepSeek-TUI, OpenCode, Cline, Roo Code…). Antes de editar una configuración deja una copia `*.antes-de-docpack`.
+Reinicia el agente al terminar. Detalles en [plugins/deepseek/README.md](plugins/deepseek/README.md).
+
+### Solo el comando `docpack`
+
+Para usarlo desde la terminal o conectarlo a otro cliente MCP
+(`docpack mcp` es un servidor MCP por stdio):
+
+```powershell
+irm https://raw.githubusercontent.com/xskyofx-lang/docpack/main/install/install.ps1 | iex
+```
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/xskyofx-lang/docpack/main/install/install.sh | bash
+```
+
+Instala el ejecutable en `%LOCALAPPDATA%\Programs\DocPack` (y lo agrega a tu
+PATH de usuario) o en `~/.local/bin`.
 
 ## Cómo usarlo sin gastar tokens de más
 
@@ -371,6 +472,7 @@ salida es un JSON con la ruta del pack y sus números.
 | `docpack diff diseno_v1.3.docx diseno_v1.4.docx` | Qué cambió entre dos versiones: secciones y filas de tablas |
 | `docpack doctor` | Packs a medias o desactualizados, archivos ajenos en `docpack/` y documentos sin pack |
 | `docpack catalog` | Rehace `docpack/index.json` (se actualiza solo con cada pack) |
+| `docpack mcp` | Servidor MCP por stdio con `docpack_build`, `docpack_text`, `docpack_find`, `docpack_diff`, `docpack_catalog` y `docpack_doctor` |
 
 Todos aceptan `--project <carpeta>`. Un archivo `.docpackignore` en el proyecto
 (un patrón por línea, por ejemplo `exportacion_*.xls`) deja fuera los
@@ -408,6 +510,7 @@ vez que se lee. Lo que cambió en cada versión está en
 engine/                 el motor: biblioteca y comando docpack (Rust)
   src/lib.rs            convierte y arma el pack, sin saber nada de ningún agente
   src/claude_code.rs    el único archivo que conoce el protocolo de Claude Code
+  src/mcp.rs            el servidor MCP (docpack mcp) para los demás agentes
   vendor/pdf-extract/   pdf-extract 0.12.1 (MIT) con la lectura de anchos de
                         fuente corregida: ver engine/Cargo.toml
 plugins/
@@ -415,14 +518,20 @@ plugins/
                         ejecutable de Windows) y native/ (Linux y macOS)
   muse/                 instalación para Muse: install.sh, SKILL.md y
                         check-update.sh (usa los ejecutables de native/)
-  codex/                reservado para un plugin de Codex
+  codex/ kimi/          skill, .mcp.json y README de cada agente que usa el
+  antigravity/          servidor MCP
+  deepseek/
+install/                instaladores para Windows (install.ps1) y macOS/Linux
+                        (install.sh), con --agent para registrar la skill y MCP
 docs/                   formato del pack y cómo conectar otro agente
+  assets/agentes/       logotipos de cada agente
 scripts/                compilar y empaquetar en local
 .github/workflows/      pruebas y binarios para los tres sistemas
 ```
 
-El motor no depende de Claude. Un plugin para otro agente, Codex por ejemplo,
-solo necesita su propio adaptador y su carpeta en `plugins/`. Los detalles
+El motor no depende de Claude. Un agente con MCP lo usa a través de
+`docpack mcp`; uno sin MCP solo necesita su propio adaptador y su carpeta en
+`plugins/`. Los detalles
 están en [docs/integrar-otro-agente.md](docs/integrar-otro-agente.md).
 
 ## Compilar desde el código
@@ -450,5 +559,10 @@ con cada cambio (workflow **Pruebas**).
 ## Licencia
 
 MIT. Úsalo, cámbialo y compártelo; solo conserva el aviso de autoría.
+
+Los logotipos de `docs/assets/agentes/` son marcas de sus dueños y aparecen
+solo para indicar con qué agente funciona DocPack. Vienen de
+[Simple Icons](https://simpleicons.org) (CC0) y, el de Antigravity, del sitio
+oficial de Google Antigravity.
 
 Hecho por Juan Antonio Sandoval Puente · [skyoflies.com](https://skyoflies.com)

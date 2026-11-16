@@ -1,5 +1,20 @@
 # Cambios
 
+## 0.4.6
+
+- Servidor MCP (`docpack mcp`): DocPack funciona en OpenAI Codex, Kimi Code,
+  Google Antigravity y clientes de DeepSeek con las herramientas
+  `docpack_build`, `docpack_text`, `docpack_find`, `docpack_diff`,
+  `docpack_catalog` y `docpack_doctor`. Una ruta relativa se toma desde la
+  carpeta del proyecto, no desde donde el agente arrancó el servidor.
+- Instaladores para Windows (`install/install.ps1`) y macOS/Linux
+  (`install/install.sh`): descargan el ejecutable de tu plataforma y, con
+  `--agent`, instalan la skill y registran el servidor MCP en la
+  configuración de ese agente (dejan una copia de la anterior).
+- `docpack catalog` en un proyecto sin packs dice que no hay packs en lugar
+  de un error del sistema.
+- Claude Code y Muse siguen igual.
+
 ## 0.4.5
 
 - PDF con imágenes: la copia de `pdf-extract` leía los bytes de una imagen

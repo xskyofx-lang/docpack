@@ -4,9 +4,11 @@
 //! docpack diff <pack o documento> <pack o documento> [--project <carpeta>]
 //! docpack doctor [--project <carpeta>]
 //! docpack catalog [--project <carpeta>]
+//! docpack mcp                 (MCP stdio server; JSON-RPC 2.0)
 //! docpack hook claude-code   (PreToolUse hook for Claude Code; JSON on stdin)
 //! docpack --version
 mod claude_code;
+mod mcp;
 
 use docpack::{build, library, Options};
 use std::path::{Path, PathBuf};
@@ -18,6 +20,7 @@ const USAGE: &str = "Uso:
   docpack diff <pack o documento> <pack o documento> [--project <carpeta>]
   docpack doctor [--project <carpeta>]
   docpack catalog [--project <carpeta>]
+  docpack mcp
   docpack hook claude-code
   docpack --version";
 
@@ -31,6 +34,7 @@ fn main() {
         Some("diff") => cmd_diff(rest),
         Some("doctor") => cmd_doctor(rest),
         Some("catalog") => cmd_catalog(rest),
+        Some("mcp") => mcp::serve(),
         Some("hook") => match args.get(1).map(String::as_str) {
             Some("claude-code") => claude_code::hook(),
             _ => { eprintln!("{USAGE}"); 2 }

@@ -5,8 +5,16 @@ documentos y arma el pack; no sabe nada de Claude ni de ningún otro agente. Cad
 **plugin** (`plugins/<agente>/`) es la capa delgada que le explica a un agente
 concreto cómo usarlo.
 
-Para sacar el plugin de Codex, o el de cualquier otro, no hay que tocar el
-motor.
+Para conectar otro agente no hay que tocar el motor. Si el agente habla MCP
+(Codex, Kimi Code, Antigravity, clientes de DeepSeek…), basta con registrar el
+servidor `docpack mcp` y darle la skill: así están hechos `plugins/codex`,
+`plugins/kimi`, `plugins/antigravity` y `plugins/deepseek`, que instala
+`install/install.ps1` / `install/install.sh` con `--agent <nombre>`.
+
+**Servidor MCP:** `docpack mcp` habla JSON-RPC 2.0 por stdio, una línea por
+mensaje, y ofrece `docpack_build`, `docpack_text`, `docpack_find`,
+`docpack_diff`, `docpack_catalog` y `docpack_doctor` con los mismos argumentos
+que los comandos de abajo. Una ruta relativa en `file` se toma desde `project`.
 
 ## Lo que el motor ofrece
 
@@ -16,8 +24,9 @@ motor.
 docpack build <archivo> --project <carpeta> [--no-pages] [--force]
 ```
 
-- Crea o reusa `<carpeta>/docpack/<nombre del archivo>/`. Si el archivo está
-  fuera de la carpeta del proyecto, el pack queda junto al archivo.
+- Crea o reusa `<carpeta>/docpack/<nombre del archivo>/`, también para un
+  archivo que está fuera de esa carpeta. Sin `--project`, el pack de un
+  archivo de fuera del proyecto queda junto al archivo.
 - Imprime un JSON con `pack`, `index`, `status` (`built` o `up_to_date`),
   `sections`, `tables`, `page_images` y `tokens_estimate`.
 - Código de salida 0 si salió bien, 1 si el documento no se pudo convertir, 2
