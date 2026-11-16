@@ -1,0 +1,75 @@
+name: Instaladores
+
+# Runs install/install.sh and install/install.ps1 as a person would (downloading
+# from main) in a throwaway home, for every agent, and checks what they left.
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: ["install/**", "plugins/codex/**", "plugins/kimi/**", "plugins/antigravity/**", "plugins/deepseek/**"]
+
+jobs:
+  unix:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, ubuntu-24.04-arm, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Instalar para cada agente
+        run: |
+          set -euo pipefail
+          export HOME="$RUNNER_TEMP/home"
+          mkdir -p "$HOME/.kimi-code"
+          echo '{"mcpServers":{"otro":{"command":"npx","args":["-y","algo"]}}}' > "$HOME/.kimi-code/mcp.json"
+          for agent in kimi antigravity deepseek codex; do
+            curl -fsSL "https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/${GITHUB_SHA}/install/install.sh" \
+              | sed "s#/main\"#/${GITHUB_SHA}\"#" | bash -s -- --agent "$agent"
+          done
+      - name: Revisar lo instalado
+        run: |
+          set -euo pipefail
+          export HOME="$RUNNER_TEMP/home"
+          "$HOME/.local/bin/docpack" --version
+          echo '{"jsonrpc":"2.0","id":1,"method":"tools/list"}' | "$HOME/.local/bin/docpack" mcp | grep -q docpack_build
+          test -s "$HOME/.agents/skills/docpack/SKILL.md"
+          test -s "$HOME/.gemini/config/skills/docpack/SKILL.md"
+          python3 - <<'EOF'
+          import json, os
+          home = os.environ["HOME"]
+          kimi = json.load(open(f"{home}/.kimi-code/mcp.json"))["mcpServers"]
+          assert "otro" in kimi and kimi["docpack"]["args"] == ["mcp"], kimi
+          assert os.path.isfile(f"{home}/.kimi-code/mcp.json.antes-de-docpack")
+          ag = json.load(open(f"{home}/.gemini/config/mcp_config.json"))["mcpServers"]["docpack"]
+          assert ag["command"].endswith("/.local/bin/docpack"), ag
+          print("ok")
+          EOF
+
+  windows:
+    runs-on: windows-latest
+    steps:
+      - name: Instalar para cada agente y revisar
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $home2 = Join-Path $env:RUNNER_TEMP 'home'
+          New-Item -ItemType Directory -Force "$home2\.kimi-code" | Out-Null
+          '{"mcpServers":{"otro":{"command":"npx","args":["-y","algo"]}}}' | Set-Content -Encoding utf8 "$home2\.kimi-code\mcp.json"
+          $env:USERPROFILE = $home2; $env:LOCALAPPDATA = Join-Path $env:RUNNER_TEMP 'local'
+          $script = (Invoke-RestMethod "https://raw.githubusercontent.com/$env:GITHUB_REPOSITORY/$env:GITHUB_SHA/install/install.ps1") -replace '/main''', "/$env:GITHUB_SHA'"
+          $file = Join-Path $env:RUNNER_TEMP 'install.ps1'
+          Set-Content -Encoding utf8 $file $script
+          foreach ($agent in 'kimi', 'antigravity', 'deepseek', 'codex') {
+            powershell -NoProfile -ExecutionPolicy Bypass -File $file -Agent $agent -NoPath
+            if ($LASTEXITCODE) { throw "install.ps1 -Agent ${agent}: $LASTEXITCODE" }
+          }
+          $bin = Join-Path $env:LOCALAPPDATA 'Programs\DocPack\docpack.exe'
+          & $bin --version
+          if (-not ('{"jsonrpc":"2.0","id":1,"method":"tools/list"}' | & $bin mcp | Select-String docpack_build)) { throw 'mcp' }
+          if (-not (Test-Path "$home2\.agents\skills\docpack\SKILL.md")) { throw 'skill' }
+          if (-not (Test-Path "$home2\.gemini\config\skills\docpack\SKILL.md")) { throw 'skill antigravity' }
+          $kimi = (Get-Content -Raw "$home2\.kimi-code\mcp.json" | ConvertFrom-Json).mcpServers
+          if (-not $kimi.otro -or $kimi.docpack.command -ne $bin) { throw "kimi: $($kimi | ConvertTo-Json)" }
+          $ag = (Get-Content -Raw "$home2\.gemini\config\mcp_config.json" | ConvertFrom-Json).mcpServers.docpack
+          if ($ag.command -ne $bin) { throw 'antigravity' }
+          'ok'
