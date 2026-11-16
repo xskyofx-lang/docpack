@@ -213,20 +213,26 @@ pub fn handle_message(msg: &Value) -> Option<Value> {
     }
 }
 
+/// The reply to one line of stdin, if it gets one.
+fn reply_to_line(line: &str) -> Option<Value> {
+    // A client that writes UTF-8 with a byte order mark (PowerShell 5.1 piping
+    // to a program does) puts it before the first message.
+    let trimmed = line.trim().trim_start_matches('\u{feff}').trim();
+    if trimmed.is_empty() { return None }
+    // JSON-RPC: a line that is not JSON gets a parse error with a null id.
+    match serde_json::from_str::<Value>(trimmed) {
+        Ok(msg) => handle_message(&msg),
+        Err(e) => Some(json!({ "jsonrpc": "2.0", "id": null, "error": { "code": -32700, "message": format!("JSON no válido: {e}") } })),
+    }
+}
+
 pub fn serve() -> i32 {
     let stdin = io::stdin();
     let stdout = io::stdout();
     let mut out = stdout.lock();
     for line in stdin.lock().lines() {
         let Ok(line) = line else { break };
-        let trimmed = line.trim();
-        if trimmed.is_empty() { continue; }
-        // JSON-RPC: a line that is not JSON gets a parse error with a null id.
-        let reply = match serde_json::from_str::<Value>(trimmed) {
-            Ok(msg) => handle_message(&msg),
-            Err(e) => Some(json!({ "jsonrpc": "2.0", "id": null, "error": { "code": -32700, "message": format!("JSON no válido: {e}") } })),
-        };
-        if let Some(reply) = reply {
+        if let Some(reply) = reply_to_line(&line) {
             if writeln!(out, "{reply}").is_err() || out.flush().is_err() { break; }
         }
     }
@@ -236,6 +242,16 @@ pub fn serve() -> i32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_byte_order_mark_or_a_bad_line_still_gets_an_answer() {
+        let listed = reply_to_line("\u{feff}{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/list\"}\r").unwrap();
+        assert_eq!(listed["result"]["tools"].as_array().unwrap().len(), 6);
+        let bad = reply_to_line("{bad json").unwrap();
+        assert_eq!(bad["error"]["code"], -32700);
+        assert!(bad["id"].is_null());
+        assert!(reply_to_line("   ").is_none());
+    }
 
     fn call(id: i64, name: &str, arguments: Value) -> Value {
         let reply = handle_message(&json!({"jsonrpc":"2.0","id":id,"method":"tools/call","params":{"name":name,"arguments":arguments}})).unwrap();
