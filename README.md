@@ -137,13 +137,18 @@ agent: the same binary, the same pack and the same reading rules.
 | | Agent | How it connects | Install |
 |:-:|---|---|---|
 | <img src="docs/assets/agentes/claude.svg" width="32" height="32" alt="Claude"> | **Claude Code** | Plugin (hook + skill) | [Claude Code](#claude-code) |
-| <img src="docs/assets/agentes/codex.svg" width="32" height="32" alt="OpenAI Codex"> | **OpenAI Codex** | MCP server + skill | `-Agent codex` / `--agent codex` |
-| <img src="docs/assets/agentes/kimi.svg" width="32" height="32" alt="Kimi"> | **Kimi Code** | MCP server + skill | `-Agent kimi` / `--agent kimi` |
-| <img src="docs/assets/agentes/antigravity.svg" width="32" height="32" alt="Google Antigravity"> | **Google Antigravity** | MCP server + skill | `-Agent antigravity` / `--agent antigravity` |
-| <img src="docs/assets/agentes/deepseek.svg" width="32" height="32" alt="DeepSeek"> | **DeepSeek** (DeepSeek-TUI, OpenCode, Cline…) | MCP server + skill | `-Agent deepseek` / `--agent deepseek` |
 | <img src="docs/assets/agentes/muse.svg" width="32" height="32" alt="Muse"> | **Muse** (Meta) | Local install + skill | [Muse](#muse) |
+| <img src="docs/assets/agentes/codex.svg" width="32" height="32" alt="OpenAI Codex"> | **OpenAI Codex** | MCP server + skill | [Codex](#openai-codex) |
+| <img src="docs/assets/agentes/kimi.svg" width="32" height="32" alt="Kimi"> | **Kimi Code** | MCP server + skill | [Kimi](#kimi-code) |
+| <img src="docs/assets/agentes/antigravity.svg" width="32" height="32" alt="Google Antigravity"> | **Google Antigravity** | MCP server + skill | [Antigravity](#google-antigravity) |
+| <img src="docs/assets/agentes/deepseek.svg" width="32" height="32" alt="DeepSeek"> | **DeepSeek** (DeepSeek-TUI, OpenCode, Cline…) | MCP server + skill | [DeepSeek](#deepseek) |
 
 ### Claude Code
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/img/claude-oscuro.png">
+  <img src="docs/img/claude.png" alt="Claude" height="48">
+</picture>
 
 Inside Claude Code:
 
@@ -153,29 +158,39 @@ Inside Claude Code:
 /reload-plugins
 ```
 
-The plugin carries the binary for Windows (x64), Linux (x64 and ARM64) and
-macOS (Apple Silicon and Intel) and picks the right one. When Claude tries to
-read a document, the plugin's hook builds (or reuses) its pack and points
-Claude to its index.
+Or from the terminal:
 
-### Codex, Kimi, Antigravity and DeepSeek
+```bash
+claude plugin marketplace add xskyofx-lang/docpack
+```
 
-The [Quickstart](#quickstart) commands. What each one does:
+```bash
+claude plugin install docpack@docpack
+```
 
-| Agent | Skill | MCP server |
-|---|---|---|
-| OpenAI Codex | `~/.agents/skills/docpack/` | `codex mcp add docpack -- <docpack> mcp` |
-| Kimi Code | `~/.agents/skills/docpack/` | `~/.kimi-code/mcp.json` |
-| Google Antigravity | `~/.gemini/config/skills/docpack/` | `~/.gemini/config/mcp_config.json` |
-| DeepSeek clients | `~/.agents/skills/docpack/` | prints the entry for your client's MCP config |
+That is all. No Python, no Rust, nothing else to install: the plugin carries
+the DocPack binary already built.
 
-Before editing a configuration file the installer keeps a copy next to it
-(`*.antes-de-docpack`). Add `-NoPath` on Windows to leave your user PATH alone.
-Details in `plugins/<agent>/README.md`.
+**Systems:** Windows (x64), Linux (x64 and ARM64) and macOS (Apple Silicon and
+Intel). The plugin carries the binary for each one and picks the right one.
+When Claude tries to read a document, the plugin's hook builds (or reuses) its
+pack and points Claude to its index.
+
+Some features use what your system already has. If something is missing the
+pack is still built and `manifest.json` says what was not done and why:
+
+| Feature | Windows | macOS | Linux |
+|---|---|---|---|
+| Page images | built into Windows | built into macOS | `pdftoppm` (`poppler-utils` package) |
+| OCR of scanned pages | Windows OCR, in your profile's languages | macOS Vision, in your languages | `tesseract` with its languages (for example `tesseract-ocr-spa`) |
+| Page numbers in Word | Microsoft Word or LibreOffice | LibreOffice | LibreOffice |
 
 ### Muse
 
-Muse installs programs on its own Linux machine. Send it:
+<p><img src="docs/img/muse.jpg" alt="Muse" height="160"></p>
+
+Muse does not install plugins, but its agent has its own Linux machine and can
+install programs. Send it this message:
 
 ```
 Install DocPack on your machine: download and run
@@ -186,7 +201,98 @@ so from now on you read my PDF, Word, Excel and PowerPoint documents through
 their pack, not the original file.
 ```
 
+- `install.sh` detects the platform (Linux x64 or ARM64, macOS), downloads the
+  same binary the Claude Code plugin carries to `~/.local/bin/docpack` and
+  checks it with `docpack --version`. No Rust, Python or building needed.
+- `SKILL.md` is the reading-by-parts rule, the same one Claude follows.
+- **Updates:** once a week Muse runs `check-update.sh`, which compares its
+  version with the one published in this repository. If there is a new one it
+  tells you which and what it improves (from the CHANGELOG) and asks whether to
+  install it; it never updates without your permission.
+
+Tested on Muse's machine on November 14, 2026 with a real Word document.
+The adapter's details are in [plugins/muse/README.md](plugins/muse/README.md).
+
+### OpenAI Codex
+
+<img src="docs/assets/agentes/codex.svg" width="48" height="48" alt="OpenAI Codex">
+
+**Windows** (PowerShell):
+
+```powershell
+& ([scriptblock]::Create((irm https://raw.githubusercontent.com/xskyofx-lang/docpack/main/install/install.ps1))) -Agent codex
+```
+
+**macOS and Linux**:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/xskyofx-lang/docpack/main/install/install.sh | bash -s -- --agent codex
+```
+
+Registers the server with `codex mcp add` (saved in `~/.codex/config.toml`) and puts the skill in `~/.agents/skills/docpack/`. Before editing a configuration it keeps a copy `*.antes-de-docpack`.
+Restart the agent when it finishes. Details in [plugins/codex/README.md](plugins/codex/README.md).
+
+### Kimi Code
+
+<img src="docs/assets/agentes/kimi.svg" width="48" height="48" alt="Kimi Code">
+
+**Windows** (PowerShell):
+
+```powershell
+& ([scriptblock]::Create((irm https://raw.githubusercontent.com/xskyofx-lang/docpack/main/install/install.ps1))) -Agent kimi
+```
+
+**macOS and Linux**:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/xskyofx-lang/docpack/main/install/install.sh | bash -s -- --agent kimi
+```
+
+Registers the server in `~/.kimi-code/mcp.json` and puts the skill in `~/.agents/skills/docpack/`. In Kimi, `/mcp` shows whether it is connected. Before editing a configuration it keeps a copy `*.antes-de-docpack`.
+Restart the agent when it finishes. Details in [plugins/kimi/README.md](plugins/kimi/README.md).
+
+### Google Antigravity
+
+<img src="docs/assets/agentes/antigravity.svg" width="48" height="48" alt="Google Antigravity">
+
+**Windows** (PowerShell):
+
+```powershell
+& ([scriptblock]::Create((irm https://raw.githubusercontent.com/xskyofx-lang/docpack/main/install/install.ps1))) -Agent antigravity
+```
+
+**macOS and Linux**:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/xskyofx-lang/docpack/main/install/install.sh | bash -s -- --agent antigravity
+```
+
+Registers the server in `~/.gemini/config/mcp_config.json` (shared by the app, the IDE and the CLI) and puts the skill in `~/.gemini/config/skills/docpack/`. Before editing a configuration it keeps a copy `*.antes-de-docpack`.
+Restart the agent when it finishes. Details in [plugins/antigravity/README.md](plugins/antigravity/README.md).
+
+### DeepSeek
+
+<img src="docs/assets/agentes/deepseek.svg" width="48" height="48" alt="DeepSeek">
+
+**Windows** (PowerShell):
+
+```powershell
+& ([scriptblock]::Create((irm https://raw.githubusercontent.com/xskyofx-lang/docpack/main/install/install.ps1))) -Agent deepseek
+```
+
+**macOS and Linux**:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/xskyofx-lang/docpack/main/install/install.sh | bash -s -- --agent deepseek
+```
+
+DeepSeek has no single configuration file: the installer puts the skill in `~/.agents/skills/docpack/` and prints the exact MCP entry to paste into your client (DeepSeek-TUI, OpenCode, Cline, Roo Code…). Before editing a configuration it keeps a copy `*.antes-de-docpack`.
+Restart the agent when it finishes. Details in [plugins/deepseek/README.md](plugins/deepseek/README.md).
+
 ### Only the `docpack` command
+
+To use it from the terminal or connect it to another MCP client
+(`docpack mcp` is an MCP server over stdio):
 
 ```powershell
 irm https://raw.githubusercontent.com/xskyofx-lang/docpack/main/install/install.ps1 | iex
@@ -196,6 +302,9 @@ irm https://raw.githubusercontent.com/xskyofx-lang/docpack/main/install/install.
 curl -fsSL https://raw.githubusercontent.com/xskyofx-lang/docpack/main/install/install.sh | bash
 ```
 
+It installs the binary in `%LOCALAPPDATA%\Programs\DocPack` (and adds it to
+your user PATH; `-NoPath` leaves the PATH alone) or in `~/.local/bin`.
+
 Or download the binary for your system from the
 [latest release](https://github.com/xskyofx-lang/docpack/releases/latest)
 (with its SHA-256 sums), or build it with Rust:
@@ -203,15 +312,6 @@ Or download the binary for your system from the
 ```bash
 cargo install --git https://github.com/xskyofx-lang/docpack docpack --locked
 ```
-
-Some features use what your system already has; without it the pack is still
-built and `manifest.json` says what was not done:
-
-| Feature | Windows | macOS | Linux |
-|---|---|---|---|
-| Page images | built in | built in | `pdftoppm` (`poppler-utils`) |
-| OCR of scanned pages | Windows OCR, in your profile's languages | macOS Vision | `tesseract` with its languages |
-| Page numbers in Word | Microsoft Word or LibreOffice | LibreOffice | LibreOffice |
 
 ## Commands
 

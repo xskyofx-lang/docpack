@@ -364,7 +364,15 @@ curl -fsSL https://raw.githubusercontent.com/xskyofx-lang/docpack/main/install/i
 ```
 
 Instala el ejecutable en `%LOCALAPPDATA%\Programs\DocPack` (y lo agrega a tu
-PATH de usuario) o en `~/.local/bin`.
+PATH de usuario; `-NoPath` no toca el PATH) o en `~/.local/bin`.
+
+O descarga el ejecutable de tu sistema del
+[último release](https://github.com/xskyofx-lang/docpack/releases/latest)
+(con sus sumas SHA-256), o compílalo con Rust:
+
+```bash
+cargo install --git https://github.com/xskyofx-lang/docpack docpack --locked
+```
 
 ## Cómo usarlo sin gastar tokens de más
 
