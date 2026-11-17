@@ -49,7 +49,7 @@ your document.
 
 ```bash
 docpack build clinic-inventory.xlsx      # index, sections, CSV tables, colors, formulas
-docpack find --color rosa                # only what the documents mark in pink
+docpack find --color pink                # only what the documents mark in pink
 docpack diff vaccination-plan-v1.0.docx vaccination-plan-v1.1.docx
 ```
 
@@ -61,7 +61,7 @@ Word plan. Below is a summary of DocPack's real output on them (the output
 itself is JSON).
 
 **"Test only the pink ones."** The plan highlights in pink what goes into the
-first delivery. `docpack find --color rosa` returns exactly those rows, with
+first delivery. `docpack find --color pink` returns exactly those rows, with
 their table, section and page:
 
 ```text
@@ -69,9 +69,11 @@ their table, section and page:
 2. Schedule · T01 row 4   Cat | Triple feline | 8 weeks | 0.5 ml
 ```
 
-Each color in the document has its name (`rojo`, `rosa`, `gris`, `amarillo`…),
-its hex value and where it is used (text, fill, highlight), so "the gray rows"
-or `--color FF69B4` work too.
+Each color in the document has its name, its hex value and where it is used
+(text, fill, highlight). `--color` takes the name in English or Spanish
+(`pink` or `rosa`, `gray`/`grey` or `gris`, `red`, `yellow`…) or an exact hex
+value such as `FF00FF`. The pack itself writes color names in Spanish
+(`rojo`, `rosa`, `gris`, `amarillo`…).
 
 **What changed between versions.** `docpack diff` compares sections and table
 rows, not bytes:
@@ -320,7 +322,7 @@ cargo install --git https://github.com/xskyofx-lang/docpack docpack --locked
 | `docpack build <file>` | Build or reuse the pack (`--force` rebuilds, `--no-pages` skips page images) |
 | `docpack text <file> --pages 4-5` | The text of those pages, from the pack |
 | `docpack find "text"` | Search every pack of the project: pack, section or table, page and line. Filters: `--pack`, `--in tablas`, `--in texto` |
-| `docpack find --color rosa` | What the documents mark in that color (or `--color FF69B4`) |
+| `docpack find --color pink` | What the documents mark in that color: name in English or Spanish (`pink`, `rosa`) or hex (`--color FF00FF`) |
 | `docpack diff <old> <new>` | What changed between two versions: sections and table rows |
 | `docpack doctor` | Half-built or outdated packs, foreign files and documents with no pack |
 | `docpack catalog` | Rewrites `docpack/index.json` (it also updates with every pack) |

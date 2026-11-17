@@ -1,5 +1,11 @@
 # Cambios
 
+## Próxima versión
+
+- `--color` (CLI, MCP y biblioteca) acepta el nombre del color en inglés o
+  en español: `pink` y `rosa`, `gray`/`grey` y `gris`, `red`, `yellow`… dan
+  la misma búsqueda. El pack sigue nombrando los colores en español.
+
 ## 0.4.7
 
 - Excel: se quitan los espacios de relleno al final de las celdas (las

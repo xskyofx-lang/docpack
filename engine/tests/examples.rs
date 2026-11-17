@@ -34,6 +34,23 @@ fn the_pink_rows_are_found_by_their_color() {
     let text = serde_json::to_string(&found).unwrap();
     assert!(text.contains("Parvovirus") && text.contains("Triple feline"), "{text}");
     assert!(!text.contains("Myxomatosis"), "the rabbit row is not pink: {text}");
+    // The pack names colors in Spanish; English names find the same.
+    for english in ["pink", "Pink", "PINK"] {
+        let same = library::find_with(&dir.path().join("docpack"), "", &library::Find { limit: 50, pack: None, only: None, color: Some(english.into()) });
+        assert_eq!(serde_json::to_string(&same).unwrap().replace(&format!("\"{english}\""), "\"rosa\""), text, "--color {english}");
+    }
+    let gray = library::find_with(&dir.path().join("docpack"), "", &library::Find { limit: 50, pack: None, only: None, color: Some("grey".into()) });
+    assert!(serde_json::to_string(&gray).unwrap().contains("Rabies"), "grey finds the gray row");
+}
+
+#[test]
+fn english_and_spanish_color_names_are_the_same_search() {
+    use docpack::color::named;
+    for (asked, name) in [("red", "rojo"), ("pink", "rosa"), ("gray", "gris"), ("grey", "gris"), ("yellow", "amarillo"),
+                          ("light blue", "celeste"), ("light-blue", "celeste"), ("brown", "café"), ("cafe", "café"), ("Verde", "verde")] {
+        assert_eq!(named(asked), Some(name), "{asked}");
+    }
+    assert_eq!(named("FF0000"), None, "a hex value is not a name");
 }
 
 #[test]

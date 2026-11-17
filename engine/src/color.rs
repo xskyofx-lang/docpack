@@ -86,6 +86,29 @@ pub fn name(hex: &str) -> &'static str {
     }
 }
 
+/// The color name a person asked for, as `name` writes it, in Spanish or in
+/// English: "pink" and "rosa" are the same search. Lowercase, without
+/// accents ("cafe"); None for a name DocPack does not use.
+pub fn named(asked: &str) -> Option<&'static str> {
+    let asked: String = asked.trim().to_lowercase().replace(['_', '-'], " ").split_whitespace().collect::<Vec<_>>().join(" ");
+    Some(match asked.as_str() {
+        "rojo" | "red" => "rojo",
+        "rosa" | "pink" | "magenta" | "fuchsia" => "rosa",
+        "naranja" | "orange" => "naranja",
+        "café" | "cafe" | "marrón" | "marron" | "brown" => "café",
+        "amarillo" | "yellow" | "gold" => "amarillo",
+        "verde" | "green" => "verde",
+        "celeste" | "light blue" | "lightblue" | "sky blue" | "skyblue" => "celeste",
+        "turquesa" | "turquoise" | "teal" | "cyan" | "aqua" => "turquesa",
+        "azul" | "blue" | "navy" => "azul",
+        "morado" | "purple" | "violet" | "lila" => "morado",
+        "gris" | "gray" | "grey" => "gris",
+        "negro" | "black" => "negro",
+        "blanco" | "white" => "blanco",
+        _ => return None,
+    })
+}
+
 /// "FF0000 (rojo)".
 pub fn label(hex: &str) -> String { format!("{hex} ({})", name(hex)) }
 

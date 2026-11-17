@@ -126,9 +126,12 @@ pub fn find_with(root: &Path, query: &str, opts: &Find) -> Value {
         let all = words.iter().all(|w| have.iter().any(|h| if w.chars().all(|c| c.is_ascii_digit()) { h == w } else { h.starts_with(w.as_str()) }));
         all.then(|| if t.contains(&folded) { 0 } else { 1 })
     };
+    // A color by its hex value or by its name, in Spanish or English
+    // (`rosa` or `pink`): the pack names colors in Spanish.
+    let asked_name = opts.color.as_deref().and_then(crate::color::named);
     let wanted = |hex: &str| opts.color.as_deref().is_none_or(|c| {
         let c = fold(c.trim_start_matches('#'));
-        fold(hex) == c || fold(crate::color::name(hex)) == c
+        fold(hex) == c || fold(crate::color::name(hex)) == c || asked_name == Some(crate::color::name(hex))
     });
     let snippet = |text: &str| text.split_whitespace().collect::<Vec<_>>().join(" ").chars().take(240).collect::<String>();
     let (texts, tables) = (opts.only.as_deref() != Some("tablas"), opts.only.as_deref() != Some("texto"));

@@ -57,7 +57,7 @@ fn tool_definitions() -> Value {
         },
         {
             "name": "docpack_find",
-            "description": "Search across all DocPacks in a project (or filter by pack, tables/text, or color such as 'rosa', 'rojo', 'FF69B4').",
+            "description": "Search across all DocPacks in a project (or filter by pack, tables/text, or color: a name in English or Spanish such as 'pink'/'rosa', 'red'/'rojo', 'gray'/'gris', or a hex value such as 'FF00FF').",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -65,7 +65,7 @@ fn tool_definitions() -> Value {
                     "project": { "type": "string", "description": "Optional project folder" },
                     "pack": { "type": "string", "description": "Optional pack name filter" },
                     "in": { "type": "string", "enum": ["tablas", "texto"], "description": "Restrict search to tables or prose" },
-                    "color": { "type": "string", "description": "Filter by color name or RRGGBB hex" },
+                    "color": { "type": "string", "description": "Color name in English or Spanish (pink, rosa, gray, gris…) or RRGGBB hex" },
                     "limit": { "type": "integer", "description": "Max hits (default 50)" }
                 }
             }
