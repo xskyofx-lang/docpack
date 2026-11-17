@@ -1,6 +1,6 @@
 # Cambios
 
-## Próxima versión
+## 0.4.8
 
 - `--color` (CLI, MCP y biblioteca) acepta el nombre del color en inglés o
   en español: `pink` y `rosa`, `gray`/`grey` y `gris`, `red`, `yellow`… dan

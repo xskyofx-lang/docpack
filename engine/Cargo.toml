@@ -1,6 +1,6 @@
 [package]
 name = "docpack"
-version = "0.4.7"
+version = "0.4.8"
 edition = "2021"
 authors = ["Juan Antonio Sandoval Puente"]
 homepage = "https://skyoflies.com"
