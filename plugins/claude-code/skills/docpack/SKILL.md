@@ -52,6 +52,12 @@ version and date.
      the color the legend names; never guess a color from the words. Text all
      in one color on its line in a PDF (a heading, a caption) is the
      document's style and is not marked.
+   - **Formulas.** A spreadsheet table with formulas names `formulas_file`
+     in `tablas/index.json`: `tablas/Tnn.formulas.json` lists each calculated
+     cell (`fila`, `columna` as in the CSV, header row 0) with its formula,
+     such as `=D4*E4` or `=SUMIF(Inventory!A4:A10,"VAC*",Inventory!F4:F10)`.
+     The CSV keeps the value the cell shows; read the formula to say how a
+     number is calculated.
    - `paginas/pNNN.png` only when you must see a figure or a layout.
 2. **To look at given pages, use the pack**:
    ```bash

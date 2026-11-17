@@ -182,6 +182,10 @@ mod word {
         let e = |e: windows::core::Error| e.message();
         let clsid = CLSIDFromProgID(&HSTRING::from("Word.Application")).map_err(|_| "no está instalado".to_string())?;
         let app: IDispatch = CoCreateInstance(&clsid, None, CLSCTX_LOCAL_SERVER).map_err(e)?;
+        // Closes Word on every way out of here, an error included: a document
+        // Word could not open (protected, damaged) used to return before the
+        // Quit and leave an invisible Word running for good.
+        let _closes = Closes(app.clone());
         let version = get(&app, "Version").ok().and_then(|v| BSTR::try_from(&v).ok()).map(|v| v.to_string()).unwrap_or_default();
         let _ = put(&app, "Visible", false.into());
         let _ = put(&app, "DisplayAlerts", 0i32.into());
@@ -197,12 +201,21 @@ mod word {
             ("OpenAfterExport", false.into()), ("IncludeDocProps", false.into()), ("CreateBookmarks", WD_EXPORT_CREATE_HEADING_BOOKMARKS.into()),
         ]);
         let _ = call(&doc, "Close", vec![("SaveChanges", WD_DO_NOT_SAVE_CHANGES.into())]);
-        // Word may be the one the person already has open: it is closed only
-        // when no document of theirs is left in it.
-        let open = get(&app, "Documents").and_then(dispatch).and_then(|d| get(&d, "Count")).ok().and_then(|c| i32::try_from(&c).ok());
-        if open == Some(0) { let _ = call(&app, "Quit", vec![("SaveChanges", WD_DO_NOT_SAVE_CHANGES.into())]); }
         exported?;
         Ok(if version.is_empty() { "Microsoft Word".into() } else { format!("Microsoft Word {version}") })
+    }
+
+    /// Quits the Word it holds when it goes out of scope. Word may be the one
+    /// the person already has open: it is closed only when no document of
+    /// theirs is left in it.
+    struct Closes(IDispatch);
+    impl Drop for Closes {
+        fn drop(&mut self) {
+            unsafe {
+                let open = get(&self.0, "Documents").and_then(dispatch).and_then(|d| get(&d, "Count")).ok().and_then(|c| i32::try_from(&c).ok());
+                if open == Some(0) { let _ = call(&self.0, "Quit", vec![("SaveChanges", WD_DO_NOT_SAVE_CHANGES.into())]); }
+            }
+        }
     }
 
     fn dispatch(v: VARIANT) -> Result<IDispatch, String> { IDispatch::try_from(&v).map_err(|e| e.message()) }

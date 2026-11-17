@@ -46,6 +46,19 @@ fn hsl((r, g, b): (f64, f64, f64)) -> (f64, f64, f64) {
     (h, s, l)
 }
 
+/// Office's tint (-1 to 1) on a color: a negative tint darkens it toward
+/// black, a positive one lightens it toward white, on its HSL lightness
+/// (ECMA-376 §18.8.19). Theme colors are written as a base and a tint.
+pub fn tint(hex_value: &str, tint: f64) -> Option<String> {
+    let (h, s, l) = hsl(rgb(hex_value)?);
+    let l = if tint < 0.0 { l * (1.0 + tint) } else { l * (1.0 - tint) + tint };
+    let c = (1.0 - (2.0 * l - 1.0).abs()) * s;
+    let x = c * (1.0 - ((h / 60.0).rem_euclid(2.0) - 1.0).abs());
+    let (r, g, b) = match (h / 60.0) as u32 { 0 => (c, x, 0.0), 1 => (x, c, 0.0), 2 => (0.0, c, x), 3 => (0.0, x, c), 4 => (x, 0.0, c), _ => (c, 0.0, x) };
+    let m = l - c / 2.0;
+    Some(hex(r + m, g + m, b + m))
+}
+
 /// Lightness as the eye sees it, 0 (black) to 1 (white).
 fn luma((r, g, b): (f64, f64, f64)) -> f64 { 0.2126 * r + 0.7152 * g + 0.0722 * b }
 
@@ -59,7 +72,9 @@ pub fn name(hex: &str) -> &'static str {
     }
     match h {
         h if !(15.0..335.0).contains(&h) => if l > 0.7 { "rosa" } else { "rojo" },
-        h if h < 50.0 => if l < 0.35 { "café" } else { "naranja" },
+        // Very light, toward yellow, it reads as yellow (Office's gold at
+        // 80 % lighter, FFF2CC, is the "light yellow" of a spreadsheet).
+        h if h < 50.0 => if l < 0.35 { "café" } else if h >= 40.0 && l > 0.8 { "amarillo" } else { "naranja" },
         h if h < 70.0 => "amarillo",
         h if h < 165.0 => "verde",
         h if h < 255.0 && l > 0.75 => "celeste",

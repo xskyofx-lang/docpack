@@ -62,6 +62,11 @@ now on.
      To answer "which are pink", filter the cells of `Tnn.colores.json` by
      the color the legend names, or run `docpack find --color rosa`; never
      guess a color from the words.
+   - **Formulas.** A spreadsheet table with formulas names `formulas_file`
+     in `tablas/index.json`: `tablas/Tnn.formulas.json` lists each calculated
+     cell (`fila`, `columna` as in the CSV, header row 0) with its formula,
+     such as `=D4*E4`. The CSV keeps the value the cell shows; read the
+     formula to say how a number is calculated.
    - `paginas/pNNN.png` only when you must see a figure or a layout.
 2. **To look at given pages, use the pack**:
    ```bash

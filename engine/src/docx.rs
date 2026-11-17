@@ -275,7 +275,11 @@ pub fn extract(bytes: &[u8]) -> Result<Document, String> {
                 // its paragraph style's; a mark only when it is not the body's.
                 let of = |s: &Option<String>| s.as_ref().and_then(|s| styles.by_id.get(s)).cloned().unwrap_or_default();
                 let (rs, ps) = (of(&run_style), of(&Some(para.style.clone())));
-                let c = run_color.clone().or(rs.0).or(ps.0).filter(|c| in_link == 0 && color::marks_text(c, &styles.body));
+                // A heading's style color is how the document draws its
+                // headings (Word's own Heading 1 is blue), not a mark; a color
+                // the writer put on the heading's text still is one.
+                let heading = para.own_level.is_some() || levels.contains_key(&para.style);
+                let c = run_color.clone().or(rs.0).or(if heading { None } else { ps.0 }).filter(|c| in_link == 0 && color::marks_text(c, &styles.body));
                 let f = run_fill.clone().or(rs.1).filter(|f| color::marks_fill(f));
                 append(&mut para, t, c, f);
             }

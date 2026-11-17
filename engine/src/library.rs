@@ -270,7 +270,8 @@ fn missing<T: Eq + std::hash::Hash + Clone>(a: &[T], b: &[T]) -> Vec<T> {
     a.iter().filter(|x| match left.get_mut(x) { Some(n) if *n > 0 => { *n -= 1; false } _ => true }).cloned().collect()
 }
 
-/// Rows shown per changed table; the counts are always whole.
+/// Rows shown per changed table, and lines per changed section; the counts
+/// are always whole.
 const ROWS_SHOWN: usize = 20;
 
 /// What changed from the pack `a` to the pack `b`: sections added, removed or
@@ -282,7 +283,13 @@ pub fn diff(a: &Path, b: &Path) -> Result<Value, String> {
     let (pairs, removed, added) = pair(&keys(&a), &keys(&b));
     let changed: Vec<Value> = pairs.iter().filter(|(i, j)| a.sections[*i].2 != b.sections[*j].2).map(|(i, j)| {
         let (la, lb): (Vec<&str>, Vec<&str>) = (a.sections[*i].2.lines().collect(), b.sections[*j].2.lines().collect());
-        json!({"title": b.sections[*j].1, "a": a.sections[*i].0, "b": b.sections[*j].0, "lines_removed": missing(&la, &lb).len(), "lines_added": missing(&lb, &la).len()})
+        let (gone, new) = (missing(&la, &lb), missing(&lb, &la));
+        // The lines themselves, as a reader sees them: without DocPack's color
+        // tags and page markers, and without blank lines.
+        let shown = |lines: &[&str]| lines.iter().map(|l| crate::color::strip_tags(l).trim().to_string())
+            .filter(|l| !l.is_empty() && !l.starts_with("<!--")).take(ROWS_SHOWN).collect::<Vec<_>>();
+        json!({"title": b.sections[*j].1, "a": a.sections[*i].0, "b": b.sections[*j].0,
+               "lines_removed": gone.len(), "lines_added": new.len(), "removed": shown(&gone), "added": shown(&new)})
     }).collect();
     let table_key = |t: &(String, String, Vec<Vec<String>>)| format!("{}|{}", fold(&t.1), fold(&t.2.first().map(|r| r.join(" | ")).unwrap_or_default()));
     let (tpairs, tremoved, tadded) = pair(&a.tables.iter().map(table_key).collect::<Vec<_>>(), &b.tables.iter().map(table_key).collect::<Vec<_>>());

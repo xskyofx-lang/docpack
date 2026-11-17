@@ -20,6 +20,7 @@ mod pdf;
 mod pptx;
 mod render;
 mod xlsx;
+mod xlsx_color;
 
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 /// Formats DocPack reads.
@@ -65,6 +66,12 @@ pub struct Table {
     /// The cells the document marks with a color: their fill, and the pieces
     /// of their text in a color of their own. The CSV keeps the plain text.
     pub colors: Vec<CellColor>,
+    /// Spreadsheet cells calculated by a formula: (row, column as in the
+    /// CSV, the formula with its `=`). The CSV keeps the value shown.
+    pub formulas: Vec<(usize, usize, String)>,
+    /// The row of the CSV that holds the column names: 0, or the row below
+    /// the title lines a sheet carries above its table.
+    pub header_row: usize,
 }
 
 /// A piece of text in a color (or on a highlight) that marks it.
@@ -390,8 +397,10 @@ fn write_pack(dir: &Path, source: &Path, bytes: &[u8], sha: &str, mut doc: Docum
         let csv: String = table.rows.iter().map(|r| r.iter().map(|c| csv_cell(c)).collect::<Vec<_>>().join(",")).collect::<Vec<_>>().join("\n");
         std::fs::write(staging.join(&file), format!("\u{feff}{csv}\n")).map_err(io)?;
         let columns = table.rows.iter().map(Vec::len).max().unwrap_or(0);
-        // Its header (first row) and every page it covers when more than one.
-        let header: Vec<String> = table.rows.first().map(|r| r.iter().map(|c| c.split_whitespace().collect::<Vec<_>>().join(" ")).collect()).unwrap_or_default();
+        // Its header (the first row, or the row below a sheet's title lines)
+        // and every page it covers when more than one.
+        let header: Vec<String> = table.rows.get(table.header_row).map(|r| r.iter().map(|c| c.split_whitespace().collect::<Vec<_>>().join(" ")).collect()).unwrap_or_default();
+        let header_row = (table.header_row > 0).then_some(table.header_row);
         let pages = (table.pages.len() > 1).then_some(&table.pages);
         let tokens = tokens_estimate(&csv);
         // A table larger than a section's part is data: filtered, not read.
@@ -414,7 +423,15 @@ fn write_pack(dir: &Path, source: &Path, bytes: &[u8], sha: &str, mut doc: Docum
             }
             (Some(path), serde_json::json!(count))
         };
-        table_entries.push(compact(serde_json::json!({"id": id, "title": table.title.trim(), "section": owner.get(&i).cloned(), "page": table.page, "pages": pages, "rows": table.rows.len(), "columns": columns, "header": header, "file": file, "tokens_estimate": tokens, "read": query, "check": table.check, "colores": colors, "colores_file": colors_file})));
+        // Its formulas beside it: the CSV keeps what the cell shows, this says
+        // how it is calculated.
+        let (formulas_file, formulas) = if table.formulas.is_empty() { (None, None) } else {
+            let path = format!("tablas/{id}.formulas.json");
+            let cells: Vec<serde_json::Value> = table.formulas.iter().map(|(row, column, formula)| serde_json::json!({"fila": row, "columna": column, "formula": formula})).collect();
+            std::fs::write(staging.join(&path), serde_json::to_string(&cells).map_err(|e| e.to_string())?).map_err(io)?;
+            (Some(path), Some(table.formulas.len()))
+        };
+        table_entries.push(compact(serde_json::json!({"id": id, "title": table.title.trim(), "section": owner.get(&i).cloned(), "page": table.page, "pages": pages, "rows": table.rows.len(), "columns": columns, "header": header, "header_row": header_row, "file": file, "tokens_estimate": tokens, "read": query, "check": table.check, "colores": colors, "colores_file": colors_file, "formulas": formulas, "formulas_file": formulas_file})));
     }
     let mut section_entries = Vec::new();
     let mut total = 0u64;

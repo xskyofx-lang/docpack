@@ -1,0 +1,30 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 720 340" font-family="Segoe UI, Helvetica, Arial, sans-serif" role="img" aria-labelledby="t d">
+  <title id="t">Tables read from real PDF guides</title>
+  <desc id="d">2,409-page technical guide with borderless tables: 0 tables with version 0.3, 2,271 with 0.4.0 and 2,402 with 0.4.1, 98% of the tables the guide numbers. 3,220-page manual with tables split across pages: 80% of its numbered tables in a CSV of their own with 0.4.0, 95% with 0.4.1. Tables checked by hand against the image of their page: 9 of 9 equal.</desc>
+  <rect width="720" height="340" rx="14" fill="#ffffff" stroke="#d8dee8"/>
+  <text x="28" y="40" font-size="19" font-weight="600" fill="#1b2330">Tables read from real PDF guides</text>
+  <text x="28" y="62" font-size="13" fill="#5b6576">0.3 read ruled tables only · 0.4 borderless ones too · 0.4.1 splits, joins and checks every table</text>
+
+  <text x="28" y="104" font-size="14" fill="#1b2330">2,409-page guide</text>
+  <text x="28" y="121" font-size="12" fill="#7a8494">borderless tables</text>
+  <rect x="230" y="88" width="2" height="14" fill="#b8c1cf"/>
+  <text x="240" y="100" font-size="12" fill="#5b6576">0.3 · 0</text>
+  <rect x="230" y="106" width="416" height="16" rx="4" fill="#b8c1cf"/>
+  <text x="638" y="118" font-size="12" font-weight="600" fill="#1b2330" text-anchor="end">0.4.0 · 2,271</text>
+  <rect x="230" y="126" width="440" height="16" rx="4" fill="#2f6fde"/>
+  <text x="662" y="138" font-size="12" font-weight="600" fill="#ffffff" text-anchor="end">0.4.1 · 2,402 · 98% of the ones it numbers</text>
+
+  <text x="28" y="186" font-size="14" fill="#1b2330">3,220-page manual</text>
+  <text x="28" y="203" font-size="12" fill="#7a8494">tables split across pages</text>
+  <rect x="230" y="176" width="352" height="16" rx="4" fill="#b8c1cf"/>
+  <text x="574" y="188" font-size="12" font-weight="600" fill="#1b2330" text-anchor="end">0.4.0 · 80% of its numbered tables in a CSV of their own</text>
+  <rect x="230" y="196" width="418" height="16" rx="4" fill="#2f6fde"/>
+  <text x="640" y="208" font-size="12" font-weight="600" fill="#ffffff" text-anchor="end">0.4.1 · 95%</text>
+
+  <text x="28" y="262" font-size="14" fill="#1b2330">Checked by hand</text>
+  <text x="28" y="279" font-size="12" fill="#7a8494">against the image of their page</text>
+  <text x="230" y="270" font-size="22" font-weight="700" fill="#1f8a4c">9 of 9</text>
+  <text x="310" y="270" font-size="13" fill="#5b6576">same rows, columns, header, title and pages</text>
+
+  <text x="692" y="318" font-size="11" fill="#7a8494" text-anchor="end">Every numbered table left without its CSV is named in the pack with its page and image</text>
+</svg>

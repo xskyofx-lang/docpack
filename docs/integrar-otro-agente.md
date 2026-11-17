@@ -71,10 +71,12 @@ protocolo queda aislado y el motor no cambia.
 ```
 docpack/index.json  packs[] {pack, document, kind, pages, title?, version?, date?, sections, tables, tokens_estimate, sha256, docpack_version}
 docpack/<archivo>/
-  manifest.json   source {file, name, sha256, bytes, kind, pages}, document {title?, version?, date?}, docpack_version, options, stats, notes
+  manifest.json   source {file, name, sha256, bytes, kind, pages}, document {title?, version?, date?}, docpack_version, options, stats, notes, colores? [{uso, color, nombre, veces, ejemplos}]
   index.json      sections[] {id, title, kind?, level, path?, page_start?, page_end?, file, lines, tokens_estimate, parts?, outline?, tables?, figures?}, page_images {count, file, only?}
   secciones/      NN-<título>.md
-  tablas/         Tnn.csv, index.json [{id, title, section, page, pages?, rows, columns, header, file, tokens_estimate, read?}]
+  tablas/         Tnn.csv, index.json [{id, title, section, page, pages?, rows, columns, header, header_row?, file, tokens_estimate, read?, check?, colores?, colores_file?, formulas?, formulas_file?}]
+                  Tnn.colores.json [{fila, columna, fondo?, texto?: [{texto, color?, resaltado?}]}]
+                  Tnn.formulas.json [{fila, columna, formula}]  (hojas de cálculo; el CSV lleva el valor)
   figuras/        Fnn.<ext>, index.json
   paginas/        pNNN.png  (cada página como imagen, de un PDF o de un Word)
 ```

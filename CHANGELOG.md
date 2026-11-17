@@ -1,5 +1,32 @@
 # Cambios
 
+## 0.4.7
+
+- Excel: se quitan los espacios de relleno al final de las celdas (las
+  exportaciones de ancho fijo rellenan cada celda al ancho de su columna) y
+  el manifiesto dice cuántos se quitaron. En un libro real de 10 hojas el CSV
+  pasó de 2.18 MB a 231 KB. Los espacios al inicio, que marcan sangría, se
+  quedan.
+- Excel: colores. El relleno de cada celda, el color de su texto y las
+  palabras de otro color dentro de una celda van a `tablas/Tnn.colores.json`
+  y a la leyenda del manifiesto, como en Word y PDF. Se leen los colores del
+  tema con su tono, la paleta indexada y la propia del libro; comparados con
+  lo que reporta Excel celda por celda.
+- Excel: fórmulas. `tablas/Tnn.formulas.json` trae la fórmula de cada celda
+  calculada (`=D4*E4`); el CSV sigue con el valor.
+- Excel: una hoja con un título arriba de la tabla toma como encabezado la
+  fila real (`header_row` en `tablas/index.json`) y el título nombra la tabla.
+- Word: el color de los títulos que pone su estilo (el azul de «Título 1» de
+  Word) ya no cuenta como marca; un color puesto a mano en un título sí.
+- `docpack diff` muestra las líneas que cambiaron en cada sección, no solo
+  cuántas.
+- Paginar un Word cierra Word aunque no haya podido abrir el documento; antes
+  quedaba un Word invisible abierto.
+- «Amarillo» para los tonos muy claros entre naranja y amarillo (el amarillo
+  claro de Excel, `FFF2CC`).
+- README en inglés con inicio rápido y ejemplos (`README.es.md` en español),
+  `BENCHMARKS.md` y documentos de ejemplo en `examples/`.
+
 ## 0.4.6
 
 - Servidor MCP (`docpack mcp`): DocPack funciona en OpenAI Codex, Kimi Code,
