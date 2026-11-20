@@ -321,12 +321,13 @@ cargo install --git https://github.com/xskyofx-lang/docpack docpack --locked
 |---|---|
 | `docpack build <file>` | Build or reuse the pack (`--force` rebuilds, `--no-pages` skips page images) |
 | `docpack text <file> --pages 4-5` | The text of those pages, from the pack |
+| `docpack read <file> [--section S05 [--part 2]] [--table T03 [--rows 1-50]]` | The index (with the pack's notes), a section or one part of it, or a table with its formulas and colors: for an agent without a file reader |
 | `docpack find "text"` | Search every pack of the project: pack, section or table, page and line. Filters: `--pack`, `--in tablas`, `--in texto` |
 | `docpack find --color pink` | What the documents mark in that color: name in English or Spanish (`pink`, `rosa`) or hex (`--color FF00FF`) |
 | `docpack diff <old> <new>` | What changed between two versions: sections and table rows |
 | `docpack doctor` | Half-built or outdated packs, foreign files and documents with no pack |
 | `docpack catalog` | Rewrites `docpack/index.json` (it also updates with every pack) |
-| `docpack mcp` | MCP server over stdio: `docpack_build`, `docpack_text`, `docpack_find`, `docpack_diff`, `docpack_catalog`, `docpack_doctor` |
+| `docpack mcp` | MCP server over stdio: `docpack_build`, `docpack_read`, `docpack_text`, `docpack_find`, `docpack_diff`, `docpack_catalog`, `docpack_doctor` |
 
 All of them take `--project <folder>`. A `.docpackignore` file in the project
 (one pattern per line, such as `export_*.xls`) leaves out data files that are

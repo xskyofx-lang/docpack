@@ -1,6 +1,6 @@
 ---
 name: docpack
-description: Read PDF, Word (DOCX), Excel (XLSX/XLS/ODS) and PowerPoint (PPTX) documents through their DocPack (MCP tools docpack_build, docpack_text, docpack_find, docpack_diff) instead of the original file. Use whenever the person mentions, attaches by path, or asks about a document in one of these formats.
+description: Read PDF, Word (DOCX), Excel (XLSX/XLS/ODS) and PowerPoint (PPTX) documents through their DocPack (MCP tools docpack_build, docpack_read, docpack_text, docpack_find, docpack_diff) instead of the original file. Use whenever the person mentions, attaches by path, or asks about a document in one of these formats.
 ---
 <!-- DocPack skill for DeepSeek clients. Adapted from plugins/claude-code/skills/docpack/SKILL.md (same rules, MCP tools instead of the hook): keep them in step. -->
 
@@ -66,6 +66,12 @@ version and date.
      The CSV keeps the value the cell shows; read the formula to say how a
      number is calculated.
    - `paginas/pNNN.png` only when you must see a figure or a layout.
+   - **Without a file reader** (a client with only DocPack's MCP tools), read
+     the same pack with the MCP tool `docpack_read`: only `file` gives the
+     index (with the pack's `notes`); `section` (`S05` or a title) a section,
+     and `part` one part of a long one; `table` (`T03` or a title) a table
+     with the formulas and colors of its cells, and `rows` (`"1-50"`) for a
+     large one. Each piece starts with a line naming its id, title and pages.
 2. **To look at given pages, use the pack**: the MCP tool `docpack_text`
    (`file`, `pages` such as `"4-5"` or `"1,3"`, `project`), or
    `docpack text "<document>" --pages 4-5 --project "<project folder>"`.
@@ -89,7 +95,12 @@ version and date.
    It lists sections added, removed or changed and tables with different rows.
 5. **Cite where things come from**: section title and page (sections carry
    their pages, and PDF text keeps `<!-- página N -->` markers); for a table,
-   its id and title.
+   its id and title. A marker such as `<!-- página 11 · impresa 9 -->` means
+   the document prints its own page numbers (a cover, an index, annexes
+   numbered apart): quote the printed one ("p. 9"), as the document is
+   quoted, and ask for pages by the PDF's (`11`). The index gives both for
+   each section and table (`printed_start`, `printed_end`, `printed_page`),
+   and so does each search hit (`printed_page`).
 6. **State the limits the pack states.** `manifest.json` → `notes` says how the
    pack was made and what it could not do: which engine paginated a Word
    document, which pages were read by OCR, which tables were read by the

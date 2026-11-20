@@ -68,6 +68,11 @@ now on.
      such as `=D4*E4`. The CSV keeps the value the cell shows; read the
      formula to say how a number is calculated.
    - `paginas/pNNN.png` only when you must see a figure or a layout.
+   - **Without a file reader**, read the same pack with
+     `docpack read "<document>"` (the index, with the pack's `notes`),
+     `--section S05` (and `--part 2` for one part of a long one) or
+     `--table T03` (and `--rows 1-50` for a large one); a table comes with
+     the formulas and colors of its cells.
 2. **To look at given pages, use the pack**:
    ```bash
    docpack text "<document>" --pages 4-5
@@ -93,7 +98,12 @@ now on.
    It lists sections added, removed or changed and tables with different rows.
 5. **Cite where things come from**: section title and page (sections carry
    their pages, and PDF text keeps `<!-- página N -->` markers); for a table,
-   its id and title.
+   its id and title. A marker such as `<!-- página 11 · impresa 9 -->` means
+   the document prints its own page numbers (a cover, an index, annexes
+   numbered apart): quote the printed one ("p. 9"), as the document is
+   quoted, and ask for pages by the PDF's (`11`). The index gives both for
+   each section and table (`printed_start`, `printed_end`, `printed_page`),
+   and so does each search hit (`printed_page`).
 6. **State the limits the pack states.** `manifest.json` → `notes` says how
    the pack was made and what it could not do: which engine paginated a Word
    document, which pages were read by OCR, which tables were read by the

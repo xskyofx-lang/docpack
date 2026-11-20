@@ -26,82 +26,101 @@ fn document(args: &Value, project: &Path) -> Result<PathBuf, String> {
     Ok(std::path::absolute(&path).unwrap_or(path))
 }
 
+/// What the server tells a client when it connects (MCP `instructions`):
+/// the rule and the way through a pack, for an agent that has the tools but
+/// not the DocPack skill.
+const INSTRUCTIONS: &str = "DocPack turns PDF, Word, Excel and PowerPoint documents into a local pack (<project>/docpack/<file>/) read by parts, so a document costs a fraction of its tokens. \
+Never open the original document (no file read, no script that opens it): read its pack. \
+1) docpack_read with only file returns the pack's index: sections with pages, token estimate, tables and parts; the pack's notes (manifest) say what its extraction could not do. \
+2) Read only the sections the question needs (docpack_read section), a long one by part (part), and only the tables they name (docpack_read table, rows for a large one); tables bring their colors and formulas. \
+3) To find something without knowing where it is, docpack_find searches every pack: words, a color (rosa/pink, rojo/red, gris/gray… or RRGGBB) or only tables or text; each hit gives section or table and row, part, line and page. \
+4) docpack_text gives given pages; docpack_diff compares two versions. \
+Cite section, table and page; when a page carries 'impresa N', the document numbers its pages apart: quote the printed number. An agent that can read files may open the pack's files instead (index.json, secciones/*.md, tablas/Tnn.csv, Tnn.colores.json, Tnn.formulas.json).";
+
 fn tool_definitions() -> Value {
+    let project = json!({ "type": "string", "description": "Project folder; defaults to the folder the server was started in" });
+    let file = json!({ "type": "string", "description": "The document (absolute path, or relative to the project)" });
     json!([
         {
             "name": "docpack_build",
-            "description": "Convert a PDF, DOCX, XLSX/XLS/ODS or PPTX document into a local structured DocPack (<project>/docpack/<file>/). Returns index path, section/table counts and token estimate.",
+            "description": "Convert a PDF, DOCX, XLSX/XLS/ODS or PPTX document into its local DocPack (<project>/docpack/<file>/): sections in Markdown with page markers, tables as CSV with their colors and formulas, figures, page images, OCR of scanned pages. Built once per document version (by SHA-256); the other tools build it when needed. Returns the pack and index paths, sections, tables and the token estimate. Next: docpack_read with the same file to see the index.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
-                    "file": { "type": "string", "description": "Path to the document (absolute, or relative to project)" },
-                    "project": { "type": "string", "description": "Optional project folder; defaults to the folder the server was started in" },
-                    "pages": { "type": "boolean", "description": "Render page images (default true)" },
-                    "force": { "type": "boolean", "description": "Rebuild even if SHA-256 matches (default false)" }
+                    "file": file,
+                    "project": project,
+                    "pages": { "type": "boolean", "description": "Render the image of every page (default true); false keeps only the pages that need checking" },
+                    "force": { "type": "boolean", "description": "Rebuild even if the pack matches the document (default false)" }
+                },
+                "required": ["file"]
+            }
+        },
+        {
+            "name": "docpack_read",
+            "description": "Read a document's pack by parts instead of the document. With only file: the index (sections with id, pages, tokens, tables and parts). With section (id such as S05, or its title): that section; a long one returns its parts, then ask for one with part. With table (id such as T03, or its title): its CSV rows numbered from 1 with the header, plus the formulas and colors of the rows shown; a large data table needs rows. Every piece starts with a line naming its id, title and pages (and the printed page when the document numbers its pages apart).",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "file": { "type": "string", "description": "The document (absolute path, or relative to the project), or the name of its pack" },
+                    "section": { "type": "string", "description": "Section id (S05) or title" },
+                    "part": { "type": "integer", "description": "Part of a long section, from 1" },
+                    "table": { "type": "string", "description": "Table id (T03) or title" },
+                    "rows": { "type": "string", "description": "Table rows as find names them, such as '1-50' or '4,9'; the header row is always included" },
+                    "project": project
                 },
                 "required": ["file"]
             }
         },
         {
             "name": "docpack_text",
-            "description": "Read extracted text of specific pages (e.g. '4-5' or '1,3,7-9') from a document's DocPack without loading the whole file.",
+            "description": "The text of given pages (such as '4-5' or '1,3,7-9') from a document's pack, each page under its marker '<!-- página N -->' (with '· impresa M' when the page prints another number). Pages are the PDF's own, counted from 1.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
-                    "file": { "type": "string", "description": "Path to the document (absolute, or relative to project)" },
-                    "pages": { "type": "string", "description": "Page range such as '4-5' or '1,3'" },
-                    "project": { "type": "string", "description": "Optional project folder" }
+                    "file": file,
+                    "pages": { "type": "string", "description": "Pages of the PDF, such as '4-5' or '1,3'" },
+                    "project": project
                 },
                 "required": ["file", "pages"]
             }
         },
         {
             "name": "docpack_find",
-            "description": "Search across all DocPacks in a project (or filter by pack, tables/text, or color: a name in English or Spanish such as 'pink'/'rosa', 'red'/'rojo', 'gray'/'gris', or a hex value such as 'FF00FF').",
+            "description": "Search every DocPack of the project at once. Each hit names its pack, section (or table and row), part, line and page (and printed_page when the document numbers its pages apart); then read it with docpack_read. Hits are ranked: the words as written first, then a table's title, a heading, body text, a table row; a table of contents last. Narrow with pack, in (tablas or texto) or color: only what the document marks in that color, a name in Spanish or English (rosa/pink, rojo/red, gris/gray…) or RRGGBB; with color the query may be left out.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
-                    "query": { "type": "string", "description": "Text to search for (optional when color is provided)" },
-                    "project": { "type": "string", "description": "Optional project folder" },
-                    "pack": { "type": "string", "description": "Optional pack name filter" },
-                    "in": { "type": "string", "enum": ["tablas", "texto"], "description": "Restrict search to tables or prose" },
-                    "color": { "type": "string", "description": "Color name in English or Spanish (pink, rosa, gray, gris…) or RRGGBB hex" },
+                    "query": { "type": "string", "description": "Words to search for (optional when color is given)" },
+                    "project": project,
+                    "pack": { "type": "string", "description": "Only this pack (its name: the document's file name)" },
+                    "in": { "type": "string", "enum": ["tablas", "texto"], "description": "Only tables or only text" },
+                    "color": { "type": "string", "description": "Color name in Spanish or English (rosa, pink, gris, gray…) or RRGGBB" },
                     "limit": { "type": "integer", "description": "Max hits (default 50)" }
                 }
             }
         },
         {
             "name": "docpack_diff",
-            "description": "Compare two versions of a document or pack and list added, removed or changed sections and tables.",
+            "description": "Compare two versions of a document (or their packs): sections added, removed or changed, with the lines that changed, and tables with different rows.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
-                    "old": { "type": "string", "description": "Old document or pack path/name" },
-                    "new": { "type": "string", "description": "New document or pack path/name" },
-                    "project": { "type": "string", "description": "Optional project folder" }
+                    "old": { "type": "string", "description": "Old document, or its pack name or folder" },
+                    "new": { "type": "string", "description": "New document, or its pack name or folder" },
+                    "project": project
                 },
                 "required": ["old", "new"]
             }
         },
         {
             "name": "docpack_catalog",
-            "description": "Write and return the path to <project>/docpack/index.json listing all built DocPacks.",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "project": { "type": "string", "description": "Optional project folder" }
-                }
-            }
+            "description": "Write <project>/docpack/index.json, the list of every pack with its document's title, version and date, and return its path.",
+            "inputSchema": { "type": "object", "properties": { "project": project } }
         },
         {
             "name": "docpack_doctor",
             "description": "Check the health of the project's DocPacks: packs whose document changed or disappeared, incomplete packs, packs made by an older DocPack, documents without a pack and leftovers of interrupted builds.",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "project": { "type": "string", "description": "Optional project folder" }
-                }
-            }
+            "inputSchema": { "type": "object", "properties": { "project": project } }
         }
     ])
 }
@@ -126,6 +145,24 @@ fn call_tool(name: &str, args: &Value) -> Result<String, String> {
             let pages = library::parse_pages(pages_str)?;
             let built = build(&file, &proj, &Options { pages: false, force: false, in_project })?;
             library::page_text(&built.pack, &pages)
+        }
+        "docpack_read" => {
+            let given = args.get("file").and_then(Value::as_str).filter(|s| !s.trim().is_empty()).ok_or("Falta file")?;
+            let path = document(args, &proj)?;
+            // A document is packed first (if needed); a pack is read as it is.
+            let pack = if path.is_file() {
+                build(&path, &proj, &Options { pages: false, force: false, in_project })?.pack
+            } else {
+                pack_of(&proj, given, &Options { in_project, ..Options::default() })
+            };
+            let text = |k: &str| args.get(k).and_then(Value::as_str).filter(|s| !s.trim().is_empty()).map(str::to_string);
+            let what = library::Read {
+                section: text("section"),
+                part: args.get("part").and_then(Value::as_u64).map(|p| p as usize),
+                table: text("table"),
+                rows: text("rows"),
+            };
+            library::read(&pack, &what)
         }
         "docpack_find" => {
             let query = args.get("query").and_then(Value::as_str).unwrap_or("");
@@ -186,7 +223,8 @@ pub fn handle_message(msg: &Value) -> Option<Value> {
             "result": {
                 "protocolVersion": protocol_version(msg),
                 "capabilities": { "tools": {} },
-                "serverInfo": { "name": "docpack", "version": docpack::VERSION }
+                "serverInfo": { "name": "docpack", "version": docpack::VERSION },
+                "instructions": INSTRUCTIONS
             }
         })),
         "tools/list" => Some(json!({
@@ -246,7 +284,7 @@ mod tests {
     #[test]
     fn a_byte_order_mark_or_a_bad_line_still_gets_an_answer() {
         let listed = reply_to_line("\u{feff}{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/list\"}\r").unwrap();
-        assert_eq!(listed["result"]["tools"].as_array().unwrap().len(), 6);
+        assert_eq!(listed["result"]["tools"].as_array().unwrap().len(), 7);
         let bad = reply_to_line("{bad json").unwrap();
         assert_eq!(bad["error"]["code"], -32700);
         assert!(bad["id"].is_null());
@@ -266,7 +304,11 @@ mod tests {
         let unknown = handle_message(&json!({"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"1999-01-01"}})).unwrap();
         assert_eq!(unknown["result"]["protocolVersion"], PROTOCOLS[0]);
         let list = handle_message(&json!({"jsonrpc":"2.0","id":2,"method":"tools/list"})).unwrap();
-        assert_eq!(list["result"]["tools"].as_array().unwrap().len(), 6);
+        assert_eq!(list["result"]["tools"].as_array().unwrap().len(), 7);
+        // A client without the DocPack skill still learns the rule and the
+        // way through a pack when it connects.
+        let told = init["result"]["instructions"].as_str().unwrap();
+        assert!(told.contains("Never open the original") && told.contains("docpack_read") && told.contains("impresa"), "{told}");
         assert!(handle_message(&json!({"jsonrpc":"2.0","method":"notifications/initialized"})).is_none(), "notifications get no reply");
     }
 
@@ -284,6 +326,17 @@ mod tests {
         let text = call(4, "docpack_text", json!({"file":"tablas.pdf","pages":"1","project":root}));
         assert_eq!(text["isError"], false, "{text}");
         assert!(text["content"][0]["text"].as_str().unwrap().contains("página 1"));
+
+        // Without a file reader: the index, then a table by id, by document
+        // or by pack name.
+        let index = call(5, "docpack_read", json!({"file":"tablas.pdf","project":root}));
+        assert_eq!(index["isError"], false, "{index}");
+        assert!(index["content"][0]["text"].as_str().unwrap().contains("\"sections\""));
+        let table = call(6, "docpack_read", json!({"file":"tablas.pdf","table":"T02","project":root}));
+        assert!(table["content"][0]["text"].as_str().unwrap().starts_with("<!-- T02 · "), "{table}");
+        std::fs::remove_file(project.path().join("tablas.pdf")).unwrap();
+        let by_pack = call(7, "docpack_read", json!({"file":"tablas.pdf","section":"S01","project":root}));
+        assert!(by_pack["content"][0]["text"].as_str().unwrap().starts_with("<!-- S01 · "), "{by_pack}");
 
         let found = call(5, "docpack_find", json!({"query":"Campos","project":root}));
         assert!(found["content"][0]["text"].as_str().unwrap().contains("tablas.pdf"));

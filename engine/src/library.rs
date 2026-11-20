@@ -85,10 +85,22 @@ pub fn csv_rows(text: &str) -> Vec<Vec<String>> {
     rows
 }
 
-/// The page a section's line `n` (from 0) is on: its last page marker above,
-/// else the page the section starts on.
-fn page_at(lines: &[&str], n: usize, start: Option<u64>) -> Option<u64> {
-    lines[..=n].iter().rev().find_map(|l| l.strip_prefix("<!-- página ").and_then(|r| r.split(|c: char| !c.is_ascii_digit()).next()?.parse().ok())).or(start)
+/// The page a section's line `n` (from 0) is on, and the number printed on
+/// it when the document numbers its pages apart: its last page marker above
+/// ("<!-- página 11 · impresa 9 -->"), else the page the section starts on.
+fn page_at(lines: &[&str], n: usize, section: &Value) -> (Option<u64>, Option<String>) {
+    let marker = lines[..=n].iter().rev().find_map(|l| l.strip_prefix("<!-- página ").map(|r| r.trim_end_matches("-->")));
+    match marker.and_then(|r| Some((r.split(|c: char| !c.is_ascii_digit()).next()?.parse().ok()?, r))) {
+        Some((page, rest)) => (Some(page), rest.split(" · ").find_map(|p| p.strip_prefix("impresa ")).map(|p| p.trim().to_string())),
+        None => (section["page_start"].as_u64(), section["printed_start"].as_str().map(str::to_string)),
+    }
+}
+
+/// A table's hit with the number printed on its page, when the document
+/// numbers its pages apart.
+fn with_printed(mut hit: Value, table: &Value) -> Value {
+    if let Some(p) = table["printed_page"].as_str() { hit["printed_page"] = json!(p) }
+    hit
 }
 
 /// The words of a folded text, split where letters and digits stop.
@@ -166,7 +178,10 @@ pub fn find_with(root: &Path, query: &str, opts: &Find) -> Value {
                     let leaders = contents || plain.contains("....");
                     let score = r * 4 + if heading { 1 } else { 2 } + if leaders { 8 } else { 0 };
                     let part = section["parts"].as_array().and_then(|parts| parts.iter().position(|p| p["lines"][0].as_u64().unwrap_or(0) <= n as u64 + 1 && p["lines"][1].as_u64().unwrap_or(0) >= n as u64 + 1)).map(|k| k + 1);
-                    add(score, order, fold(&plain), json!({"pack": pack, "section": section["id"], "title": section["title"], "file": file, "line": n + 1, "part": part, "page": page_at(&lines, n, section["page_start"].as_u64()), "text": snippet(&plain)}), &mut hits);
+                    let (page, printed) = page_at(&lines, n, section);
+                    let mut hit = json!({"pack": pack, "section": section["id"], "title": section["title"], "file": file, "line": n + 1, "part": part, "page": page, "text": snippet(&plain)});
+                    if let Some(p) = printed { hit["printed_page"] = json!(p) }
+                    add(score, order, fold(&plain), hit, &mut hits);
                 }
             }
         }
@@ -177,7 +192,7 @@ pub fn find_with(root: &Path, query: &str, opts: &Find) -> Value {
                 // Its title is where a table is found by name.
                 if opts.color.is_none() && !words.is_empty() {
                     if let Some(r) = rank(title) {
-                        add(r * 4, order, format!("T:{}", table["id"]), json!({"pack": pack, "table": table["id"], "title": title, "file": file, "page": table["page"], "section": table["section"], "text": snippet(title)}), &mut hits);
+                        add(r * 4, order, format!("T:{}", table["id"]), with_printed(json!({"pack": pack, "table": table["id"], "title": title, "file": file, "page": table["page"], "section": table["section"], "text": snippet(title)}), table), &mut hits);
                     }
                 }
                 let Ok(text) = std::fs::read_to_string(dir.join(file)) else { continue };
@@ -188,7 +203,7 @@ pub fn find_with(root: &Path, query: &str, opts: &Find) -> Value {
                 for (r, row) in rows.iter().enumerate() {
                     let joined = row.join(" | ");
                     let Some(score) = rank(&joined) else { continue };
-                    let mut hit = json!({"pack": pack, "table": table["id"], "title": title, "file": file, "row": r + 1, "page": table["page"], "section": table["section"], "text": snippet(&joined)});
+                    let mut hit = with_printed(json!({"pack": pack, "table": table["id"], "title": title, "file": file, "row": r + 1, "page": table["page"], "section": table["section"], "text": snippet(&joined)}), table);
                     if let Some(cells) = &colored {
                         let mut found = Vec::new();
                         for c in cells.iter().filter(|c| c["fila"].as_u64() == Some(r as u64)) {
@@ -377,6 +392,136 @@ pub fn parse_pages(spec: &str) -> Result<Vec<u32>, String> {
     out.sort();
     out.dedup();
     Ok(out)
+}
+
+/// What to read from a pack: its index (nothing named), a section (whole, or
+/// one of its parts) or a table (whole, or some of its rows).
+#[derive(Debug, Default, Clone)]
+pub struct Read { pub section: Option<String>, pub part: Option<usize>, pub table: Option<String>, pub rows: Option<String> }
+
+/// An id as the pack writes it ("S5", "s05" and "S05" are one).
+fn same_id(given: &str, id: &str) -> bool {
+    let norm = |t: &str| {
+        let t = t.trim().to_uppercase();
+        match t.split_at_checked(1) {
+            Some((k, n)) if !n.is_empty() && n.chars().all(|c| c.is_ascii_digit()) => format!("{k}{}", n.trim_start_matches('0')),
+            _ => t,
+        }
+    };
+    norm(given) == norm(id)
+}
+
+/// The entry `given` names, by id or by title: the title as written first,
+/// then one that holds it.
+fn entry_named<'a>(entries: &'a [Value], given: &str) -> Option<&'a Value> {
+    let title = |e: &Value| fold(e["title"].as_str().unwrap_or(""));
+    let wanted = fold(given);
+    entries.iter().find(|e| e["id"].as_str().is_some_and(|id| same_id(given, id)))
+        .or_else(|| entries.iter().find(|e| title(e) == wanted))
+        .or_else(|| entries.iter().find(|e| !wanted.is_empty() && title(e).contains(&wanted)))
+}
+
+/// "S01 · título" for each entry, to say what there is when a name matches
+/// nothing.
+fn names(entries: &[Value]) -> String {
+    let shown: Vec<String> = entries.iter().take(40).map(|e| format!("{} · {}", e["id"].as_str().unwrap_or(""), e["title"].as_str().unwrap_or(""))).collect();
+    let more = if entries.len() > 40 { format!("\n… y {} más", entries.len() - 40) } else { String::new() };
+    format!("{}{more}", shown.join("\n"))
+}
+
+/// " · p. 5 (impresa 3)", " · p. 5–7", or nothing without pages.
+fn pages_label(start: Option<u64>, end: Option<u64>, printed: Option<&str>) -> String {
+    let printed = printed.map(|p| format!(" (impresa {p})")).unwrap_or_default();
+    match (start, end) {
+        (Some(a), Some(b)) if a != b => format!(" · p. {a}–{b}{printed}"),
+        (Some(a), _) => format!(" · p. {a}{printed}"),
+        _ => String::new(),
+    }
+}
+
+/// A piece of a pack, for an agent that reads only through DocPack (an MCP
+/// client without a file reader): the index, a section or one of its parts,
+/// or a table with its colors and formulas. Each piece begins with a line that
+/// says what it is and where it comes from.
+pub fn read(pack: &Path, what: &Read) -> Result<String, String> {
+    let index_text = std::fs::read_to_string(pack.join("index.json")).map_err(|_| format!("{} no tiene index.json", pack.display()))?;
+    let index: Value = serde_json::from_str(&index_text).map_err(|e| format!("index.json ilegible: {e}"))?;
+    if let Some(name) = what.table.as_deref() {
+        let tables = read_json(&pack.join("tablas").join("index.json")).and_then(|v| v.as_array().cloned()).unwrap_or_default();
+        let table = entry_named(&tables, name).ok_or_else(|| format!("No hay tabla «{name}». Tablas del documento:\n{}", names(&tables)))?;
+        let file = table["file"].as_str().ok_or("La tabla no tiene archivo")?;
+        let rows = csv_rows(&std::fs::read_to_string(pack.join(file)).map_err(|e| format!("{file}: {e}"))?);
+        let header = table["header_row"].as_u64().unwrap_or(0) as usize;
+        // Rows as `find` names them (from 1, the header among them); the
+        // header row always goes first so the columns keep their names.
+        let chosen: Vec<usize> = match what.rows.as_deref() {
+            Some(spec) => {
+                let asked = parse_pages(spec).map_err(|e| e.replace("Página", "Fila").replace("páginas", "filas"))?;
+                let mut picked: Vec<usize> = std::iter::once(header).chain(asked.iter().map(|r| *r as usize - 1)).filter(|r| *r < rows.len()).collect();
+                picked.sort();
+                picked.dedup();
+                picked
+            }
+            None if table["read"].is_string() => return Err(format!("{} es una tabla de datos de {} filas: pide rows (por ejemplo \"1-50\") o búscala con docpack_find. Encabezado: {}", table["id"].as_str().unwrap_or(""), rows.len(), table["header"])),
+            None => (0..rows.len()).collect(),
+        };
+        let last_page = table["pages"].as_array().and_then(|p| p.last()).and_then(Value::as_u64);
+        let shown = if chosen.len() < rows.len() { format!(", se muestran {}", chosen.len()) } else { String::new() };
+        let mut out = format!("<!-- {} · {}{} · {} filas{shown} · {file} -->\n", table["id"].as_str().unwrap_or(""), table["title"].as_str().unwrap_or(""),
+            pages_label(table["page"].as_u64(), last_page.or(table["page"].as_u64()), table["printed_page"].as_str()), rows.len());
+        for &r in &chosen {
+            out.push_str(&format!("{}: {}\n", r + 1, rows[r].iter().map(|c| crate::csv_cell(c)).collect::<Vec<_>>().join(",")));
+        }
+        // Its formulas and colors, for the rows shown (fila from 0, as in
+        // the CSV).
+        for (key, label) in [("formulas_file", "Fórmulas"), ("colores_file", "Colores")] {
+            let Some(cells) = table[key].as_str().and_then(|f| read_json(&pack.join(f))).and_then(|v| v.as_array().cloned()) else { continue };
+            let picked: Vec<&Value> = cells.iter().filter(|c| c["fila"].as_u64().is_some_and(|f| chosen.contains(&(f as usize)))).collect();
+            if !picked.is_empty() { out.push_str(&format!("\n{label} (fila y columna desde 0, como en el CSV):\n{}\n", serde_json::to_string(&picked).unwrap_or_default())) }
+        }
+        return Ok(out);
+    }
+    if let Some(name) = what.section.as_deref() {
+        let sections = section_list(pack, &index);
+        let section = entry_named(&sections, name).ok_or_else(|| format!("No hay sección «{name}». Secciones del documento:\n{}", names(&sections)))?;
+        let file = section["file"].as_str().ok_or("La sección no tiene archivo")?;
+        let body = std::fs::read_to_string(pack.join(file)).map_err(|e| format!("{file}: {e}"))?;
+        let parts = section["parts"].as_array().cloned().unwrap_or_default();
+        let head = format!("<!-- {} · {}{}", section["id"].as_str().unwrap_or(""), section["title"].as_str().unwrap_or(""),
+            pages_label(section["page_start"].as_u64(), section["page_end"].as_u64(), section["printed_start"].as_str()));
+        let tables = section["tables"].as_array().filter(|t| !t.is_empty())
+            .map(|t| format!("\nTablas de esta sección (léelas con table): {}", t.iter().filter_map(Value::as_str).collect::<Vec<_>>().join(", "))).unwrap_or_default();
+        return match what.part {
+            // A long section is read by parts: without one, the parts to pick.
+            None if !parts.is_empty() => {
+                let list: Vec<String> = parts.iter().enumerate().map(|(i, p)| format!("parte {} · líneas {}–{} · {} tok · {}", i + 1, p["lines"][0], p["lines"][1], p["tokens_estimate"], p["starts"].as_str().unwrap_or(""))).collect();
+                Ok(format!("{head} · {} tok -->\nSección larga: pide una parte con part (1 a {}).\n{}{tables}\n", section["tokens_estimate"], parts.len(), list.join("\n")))
+            }
+            None => Ok(format!("{head} · {file} -->\n{}{tables}\n", body.trim_end())),
+            Some(k) => {
+                let p = parts.get(k.wrapping_sub(1)).ok_or_else(|| if parts.is_empty() { "Esta sección no tiene partes: léela sin part".to_string() } else { format!("La sección tiene las partes 1 a {}", parts.len()) })?;
+                let lines: Vec<&str> = body.lines().collect();
+                let a = (p["lines"][0].as_u64().unwrap_or(1) as usize).clamp(1, lines.len().max(1));
+                let b = (p["lines"][1].as_u64().unwrap_or(1) as usize).clamp(a, lines.len().max(a));
+                let text = lines.get(a - 1..b.min(lines.len())).unwrap_or_default().join("\n");
+                // The page the part starts on, when its first line is not a
+                // page marker: the last marker above it.
+                let page = lines[..a - 1].iter().rev().find(|l| l.starts_with("<!-- página ")).filter(|_| !text.starts_with("<!-- página ")).map(|l| format!("\n{l}")).unwrap_or_default();
+                Ok(format!("{head} · parte {k} de {} · líneas {a}–{b} -->{page}\n{text}{tables}\n", parts.len()))
+            }
+        };
+    }
+    // The index, with the limits the manifest states (OCR, tables read by
+    // alignment, printed page numbers): an agent that reads only through
+    // DocPack sees them too.
+    let notes = read_json(&pack.join("manifest.json")).map(|m| m["notes"].clone()).filter(|n| n.as_array().is_some_and(|a| !a.is_empty()));
+    match (notes, index) {
+        (Some(notes), Value::Object(mut map)) => {
+            map.insert("notes".into(), notes);
+            serde_json::to_string(&map).map_err(|e| e.to_string())
+        }
+        _ => Ok(index_text),
+    }
 }
 
 /// The text of `pages` from a pack: each page under its marker. A document

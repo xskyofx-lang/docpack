@@ -1,5 +1,31 @@
 # Cambios
 
+## 0.4.9
+
+Se atiende la mejora propuesta por Juan González Salazar tras auditar con
+DocPack bases normativas de licitaciones públicas.
+
+- Página impresa. Cuando el documento numera sus páginas aparte del PDF
+  (portada, índice, anexos con numeración propia), cada marca de página dice
+  las dos (`<!-- página 11 · impresa 9 -->`). El índice también las da por
+  sección y tabla (`printed_start`, `printed_end`, `printed_page`), igual que
+  cada resultado de `find` (`printed_page`), y el manifiesto lo avisa. La
+  impresa es el número del pie o del encabezado que avanza de una hoja a la
+  siguiente (un año o un «de 30» que se repite no cuenta); si las hojas no
+  traen número, se usa la numeración que declara el PDF (i, ii, A-1…).
+- `docpack read` y la herramienta MCP `docpack_read`, para un agente que no
+  puede abrir archivos: sin más argumentos dan el índice con las notas del
+  pack. Con `section` (`S05` o el título, y `part` para una parte de una
+  sección larga) dan esa sección, y con `table` (`T03`, y `rows` para una
+  tabla grande) dan la tabla con sus fórmulas y colores.
+- El servidor MCP manda instrucciones al conectarse: la regla de no abrir el
+  original y cómo recorrer un pack, para el agente que tiene las herramientas
+  pero no la skill. Las descripciones de las herramientas dicen qué devuelve
+  cada una.
+- Las skills de todos los agentes explican cómo citar la página impresa, y
+  las de Codex, Kimi, DeepSeek, Antigravity y Muse explican `docpack_read` y
+  `docpack read`.
+
 ## 0.4.8
 
 - `--color` (CLI, MCP y biblioteca) acepta el nombre del color en inglés o

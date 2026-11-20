@@ -927,6 +927,115 @@ fn leader_lines(page: &Page) -> HashSet<usize> {
     }).flatten().collect()
 }
 
+/// The value of a Roman numeral written the usual way ("iv" → 4, "XII" →
+/// 12); None for any other word, even one of its letters ("civil", "mix").
+fn roman(text: &str) -> Option<u32> {
+    const STEPS: [(u32, &str); 13] = [(1000, "m"), (900, "cm"), (500, "d"), (400, "cd"), (100, "c"), (90, "xc"), (50, "l"), (40, "xl"), (10, "x"), (9, "ix"), (5, "v"), (4, "iv"), (1, "i")];
+    let lower = text.to_lowercase();
+    let mut rest = lower.as_str();
+    let mut value = 0;
+    for (n, mark) in STEPS {
+        while let Some(r) = rest.strip_prefix(mark) { value += n; rest = r }
+    }
+    (rest.is_empty() && value > 0 && to_roman(value) == lower).then_some(value)
+}
+
+fn to_roman(mut n: u32) -> String {
+    const STEPS: [(u32, &str); 13] = [(1000, "m"), (900, "cm"), (500, "d"), (400, "cd"), (100, "c"), (90, "xc"), (50, "l"), (40, "xl"), (10, "x"), (9, "ix"), (5, "v"), (4, "iv"), (1, "i")];
+    let mut out = String::new();
+    for (v, mark) in STEPS { while n >= v { out.push_str(mark); n -= v } }
+    out
+}
+
+/// The numbers written in a page's running header and footer ("Pág. 9",
+/// "- 9 -", "Página 9 de 30", "iv"): each with its line's height, its value
+/// and how it is printed. Which of them is the page's own number is decided
+/// against the pages around it (see `printed_pages`).
+fn folio_candidates(page: &Page, band: &HashSet<usize>) -> Vec<(i64, u32, String)> {
+    let mut by_line: std::collections::BTreeMap<i64, Vec<&Glyph>> = Default::default();
+    for &g in band { by_line.entry(page.glyphs[g].y.round() as i64).or_default().push(&page.glyphs[g]) }
+    let mut out = Vec::new();
+    for (y, mut gs) in by_line {
+        gs.sort_by(|a, b| a.x.total_cmp(&b.x));
+        let text: String = gs.iter().map(|g| g.text.as_str()).collect();
+        for token in text.split(|c: char| !c.is_alphanumeric()).filter(|t| !t.is_empty()) {
+            let value = if token.chars().all(|c| c.is_ascii_digit()) { token.parse().ok().filter(|_| token.len() <= 4) } else { roman(token) };
+            if let Some(v) = value { out.push((y, v, token.to_string())) }
+        }
+    }
+    out
+}
+
+/// Each page's own printed number, from the numbers of its running header
+/// and footer: the one that goes up by one from the page before or to the
+/// page after at about the same height. A year or a "de 30" that every page
+/// repeats never does, nor a section number, which stays. A page without one
+/// (a cover) has none.
+fn printed_pages(candidates: &[Vec<(i64, u32, String)>]) -> HashMap<u32, String> {
+    let near = |a: i64, b: i64| (a - b).abs() <= 2;
+    let follows = |page: Option<&Vec<(i64, u32, String)>>, y: i64, value: Option<u32>| {
+        value.is_some_and(|v| page.is_some_and(|p| p.iter().any(|(y2, v2, _)| near(y, *y2) && *v2 == v)))
+    };
+    let mut out = HashMap::new();
+    for (i, page) in candidates.iter().enumerate() {
+        let before = i.checked_sub(1).and_then(|p| candidates.get(p));
+        let after = candidates.get(i + 1);
+        let score = |(y, v, _): &&(i64, u32, String)| u8::from(follows(before, *y, v.checked_sub(1))) + u8::from(follows(after, *y, Some(v + 1)));
+        if let Some(best) = page.iter().filter(|c| score(c) > 0).max_by_key(score) {
+            out.insert(i as u32 + 1, best.2.clone());
+        }
+    }
+    out
+}
+
+/// The page numbers the PDF itself declares (/PageLabels in its catalog:
+/// "i, ii, iii, 1, 2…", "A-1, A-2…"), as a viewer shows them.
+fn page_labels(pdf: &lopdf::Document, count: u32) -> HashMap<u32, String> {
+    let deref = |o: &Object| pdf.dereference(o).ok().map(|(_, o)| o.clone());
+    let mut ranges: Vec<(u32, Dictionary)> = Vec::new();
+    let mut nodes: Vec<(Object, u8)> = pdf.catalog().ok().and_then(|c| c.get(b"PageLabels").ok()).map(|o| vec![(o.clone(), 0)]).unwrap_or_default();
+    while let Some((node, depth)) = nodes.pop() {
+        let Some(Object::Dictionary(node)) = deref(&node) else { continue };
+        if let Some(Object::Array(nums)) = node.get(b"Nums").ok().and_then(deref) {
+            for pair in nums.chunks_exact(2) {
+                if let (Ok(start), Some(Object::Dictionary(style))) = (pair[0].as_i64(), deref(&pair[1])) {
+                    if start >= 0 { ranges.push((start as u32, style)) }
+                }
+            }
+        }
+        if depth < 16 {
+            if let Some(Object::Array(kids)) = node.get(b"Kids").ok().and_then(deref) { nodes.extend(kids.into_iter().map(|k| (k, depth + 1))) }
+        }
+    }
+    ranges.sort_by_key(|r| r.0);
+    let mut out = HashMap::new();
+    for (k, (start, style)) in ranges.iter().enumerate() {
+        let end = ranges.get(k + 1).map_or(count, |r| r.0.min(count));
+        let prefix = style.get(b"P").ok().and_then(|o| o.as_str().ok()).map(crate::about::pdf_string).unwrap_or_default();
+        let first = style.get(b"St").ok().and_then(|o| o.as_i64().ok()).filter(|n| *n > 0).unwrap_or(1) as u32;
+        let kind = style.get(b"S").ok().and_then(|o| o.as_name().ok()).map(|n| n.to_vec());
+        for index in *start..end {
+            let n = first + index - start;
+            let letters = |upper: bool| {
+                let c = char::from(b'a' + ((n - 1) % 26) as u8);
+                let c = if upper { c.to_ascii_uppercase() } else { c };
+                c.to_string().repeat(((n - 1) / 26 + 1) as usize)
+            };
+            let number = match kind.as_deref() {
+                Some(b"D") => n.to_string(),
+                Some(b"R") => to_roman(n).to_uppercase(),
+                Some(b"r") => to_roman(n),
+                Some(b"A") => letters(true),
+                Some(b"a") => letters(false),
+                _ => String::new(),
+            };
+            let label = format!("{prefix}{number}");
+            if !label.trim().is_empty() { out.insert(index + 1, label); }
+        }
+    }
+    out
+}
+
 /// "la página 3", "las páginas 1–4, 7".
 fn pages_list(pages: &[u32]) -> String {
     let mut runs: Vec<(u32, u32)> = Vec::new();
@@ -975,12 +1084,14 @@ pub fn extract(bytes: &[u8]) -> Result<Document, String> {
     // and the page it ended on.
     let mut last: Option<(usize, Vec<f64>, Vec<f64>, bool, u32)> = None;
     let (mut by_alignment, mut doubtful) = (Vec::new(), Vec::new());
+    let mut folios = Vec::new();
     for (i, page) in collector.pages.iter().enumerate() {
         let number = i as u32 + 1;
         let mut found = grids(page);
         let neighbors: Vec<&HashSet<(i64, String)>> = [i.checked_sub(1), Some(i + 1)].into_iter().flatten().filter_map(|p| bands.get(p)).collect();
         let mut taken: HashSet<usize> = found.iter().flat_map(|g| g.members.iter().copied()).collect();
         let band = running_band(page, &neighbors);
+        folios.push(folio_candidates(page, &band));
         taken.extend(band.iter().copied());
         taken.extend(leader_lines(page));
         let (aligned, unsure) = streams(page, &taken);
@@ -1153,10 +1264,22 @@ pub fn extract(bytes: &[u8]) -> Result<Document, String> {
             *text = out.join("\n");
         }
     }
+    // The page numbers printed on the pages, which a contract or a set of
+    // rules is quoted by ("Pág. 9"), when they are not the PDF's own (a cover,
+    // an index, annexes numbered apart): the number in the running header or
+    // footer, else the numbering the PDF declares.
+    let mut printed = page_labels(&pdf, count);
+    printed.extend(printed_pages(&folios));
+    printed.retain(|p, label| *label != p.to_string());
+    if let Some((p, label)) = printed.iter().min_by_key(|(p, _)| **p) {
+        doc.notes.push(format!("La numeración impresa no es la del PDF (la página {p} del PDF dice «{label}»): cada marca de página, sección y tabla lleva también la impresa; cítala así y pide pages por la del PDF."));
+    }
+    doc.printed = printed.iter().map(|(p, l)| (*p, l.clone())).collect();
     let text_of = |from: u32, to: u32| -> String {
         (from..=to).map(|p| {
             let how = if by_ocr.contains(&p) { " · texto por OCR" } else { "" };
-            format!("<!-- página {p}{how} -->\n{}\n", pages_text[(p - 1) as usize].trim())
+            let label = printed.get(&p).map(|l| format!(" · impresa {l}")).unwrap_or_default();
+            format!("<!-- página {p}{label}{how} -->\n{}\n", pages_text[(p - 1) as usize].trim())
         }).collect::<Vec<_>>().join("\n")
     };
     // Bookmarks: (page, title), levels 1-2, merged when several start on one page.
@@ -1209,6 +1332,12 @@ mod tests {
         for yes in ["12", "- 3 -", "1088", "iv", "XII"] { assert!(page_number(yes), "{yes:?}") }
         // On a page set sideways each letter is a line of its own in the margin.
         for no in ["R", "e", "V S", "ab", "12345", ""] { assert!(!page_number(no), "{no:?}") }
+    }
+
+    #[test]
+    fn a_roman_numeral_is_only_one_written_the_usual_way() {
+        for (text, n) in [("iv", 4), ("XII", 12), ("xl", 40), ("i", 1)] { assert_eq!(roman(text), Some(n), "{text}") }
+        for no in ["iiii", "vx", "civil", "Pág", ""] { assert_eq!(roman(no), None, "{no}") }
     }
 
     #[test]

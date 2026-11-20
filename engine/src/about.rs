@@ -49,7 +49,7 @@ pub fn pdf(doc: &lopdf::Document) -> About {
 }
 
 /// A PDF text string: UTF-16 with its byte order mark, else one byte a letter.
-fn pdf_string(bytes: &[u8]) -> String {
+pub(crate) fn pdf_string(bytes: &[u8]) -> String {
     if bytes.starts_with(&[0xFE, 0xFF]) {
         let units: Vec<u16> = bytes[2..].chunks_exact(2).map(|c| u16::from_be_bytes([c[0], c[1]])).collect();
         String::from_utf16_lossy(&units)

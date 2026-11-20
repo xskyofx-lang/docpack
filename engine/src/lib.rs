@@ -110,6 +110,9 @@ pub struct Document {
     pub about: About,
     /// The colors the document marks with, how often and on what text.
     pub colors: color::Legend,
+    /// The number printed on a page when it is not its place in the file
+    /// ("9" on the PDF's page 11): what the document is quoted by.
+    pub printed: std::collections::BTreeMap<u32, String>,
 }
 
 /// A document's own title, version and date (its properties; the version
@@ -299,7 +302,7 @@ fn current(dir: &Path, sha: &str, options: &Options) -> Option<serde_json::Value
     (manifest["source"]["sha256"] == sha && manifest["docpack_version"] == VERSION && (has_pages || !options.pages)).then_some(manifest)
 }
 
-fn csv_cell(value: &str) -> String {
+pub(crate) fn csv_cell(value: &str) -> String {
     if value.contains([',', '"', '\n', '\r']) { format!("\"{}\"", value.replace('"', "\"\"")) } else { value.to_string() }
 }
 
@@ -431,7 +434,7 @@ fn write_pack(dir: &Path, source: &Path, bytes: &[u8], sha: &str, mut doc: Docum
             std::fs::write(staging.join(&path), serde_json::to_string(&cells).map_err(|e| e.to_string())?).map_err(io)?;
             (Some(path), Some(table.formulas.len()))
         };
-        table_entries.push(compact(serde_json::json!({"id": id, "title": table.title.trim(), "section": owner.get(&i).cloned(), "page": table.page, "pages": pages, "rows": table.rows.len(), "columns": columns, "header": header, "header_row": header_row, "file": file, "tokens_estimate": tokens, "read": query, "check": table.check, "colores": colors, "colores_file": colors_file, "formulas": formulas, "formulas_file": formulas_file})));
+        table_entries.push(compact(serde_json::json!({"id": id, "title": table.title.trim(), "section": owner.get(&i).cloned(), "page": table.page, "printed_page": table.page.and_then(|p| doc.printed.get(&p)), "pages": pages, "rows": table.rows.len(), "columns": columns, "header": header, "header_row": header_row, "file": file, "tokens_estimate": tokens, "read": query, "check": table.check, "colores": colors, "colores_file": colors_file, "formulas": formulas, "formulas_file": formulas_file})));
     }
     let mut section_entries = Vec::new();
     let mut total = 0u64;
@@ -443,8 +446,19 @@ fn write_pack(dir: &Path, source: &Path, bytes: &[u8], sha: &str, mut doc: Docum
         let mut body = String::new();
         if !section.path.is_empty() { body.push_str(&format!("_{}_\n\n", section.path.join(" › "))); }
         body.push_str(&format!("# {}\n\n", section.title.trim()));
+        // Its printed numbers beside the PDF's, when the document numbers its
+        // pages apart.
+        let printed_start = section.page_start.and_then(|p| doc.printed.get(&p));
+        let printed_end = section.page_end.and_then(|p| doc.printed.get(&p));
         if let (Some(a), Some(b)) = (section.page_start, section.page_end) {
-            body.push_str(&if a == b { format!("_Página {a}_\n\n") } else { format!("_Páginas {a}–{b}_\n\n") });
+            let printed = match (printed_start, printed_end) {
+                (Some(x), Some(y)) if x != y => format!(" · impresas {x}–{y}"),
+                (Some(x), Some(_)) => format!(" · impresa {x}"),
+                (Some(x), None) => format!(" · impresa desde {x}"),
+                (None, Some(y)) => format!(" · impresa hasta {y}"),
+                (None, None) => String::new(),
+            };
+            body.push_str(&if a == b { format!("_Página {a}{printed}_\n\n") } else { format!("_Páginas {a}–{b}{printed}_\n\n") });
         }
         body.push_str(section.text.trim());
         body.push('\n');
@@ -452,7 +466,7 @@ fn write_pack(dir: &Path, source: &Path, bytes: &[u8], sha: &str, mut doc: Docum
         total += tokens;
         std::fs::write(staging.join(&file), &body).map_err(io)?;
         let lines = body.lines().count();
-        section_entries.push(compact(serde_json::json!({"id": id, "title": section.title.trim(), "kind": section.contents.then_some("toc"), "level": section.level, "path": section.path, "page_start": section.page_start, "page_end": section.page_end, "file": file, "lines": lines, "tables": refs, "figures": figs, "tokens_estimate": tokens, "outline": outline(&body), "parts": parts(&body)})));
+        section_entries.push(compact(serde_json::json!({"id": id, "title": section.title.trim(), "kind": section.contents.then_some("toc"), "level": section.level, "path": section.path, "page_start": section.page_start, "page_end": section.page_end, "printed_start": printed_start, "printed_end": printed_end, "file": file, "lines": lines, "tables": refs, "figures": figs, "tokens_estimate": tokens, "outline": outline(&body), "parts": parts(&body)})));
     }
     total += table_entries.iter().map(|t| t["tokens_estimate"].as_u64().unwrap_or(0)).sum::<u64>();
 
@@ -493,6 +507,12 @@ fn write_pack(dir: &Path, source: &Path, bytes: &[u8], sha: &str, mut doc: Docum
             match (n("page_start"), n("page_end")) {
                 (Some(a), Some(b)) if a == b => line.push_str(&format!(" · p.{a}")),
                 (Some(a), Some(b)) => line.push_str(&format!(" · p.{a}–{b}")),
+                _ => {}
+            }
+            let s = |k: &str| e.get(k).and_then(|v| v.as_str());
+            match (s("printed_start"), s("printed_end")) {
+                (Some(x), Some(y)) if x != y => line.push_str(&format!(" (impr. {x}–{y})")),
+                (Some(x), _) | (None, Some(x)) => line.push_str(&format!(" (impr. {x})")),
                 _ => {}
             }
             line.push_str(&format!(" · {} tok", n("tokens_estimate").unwrap_or(0)));

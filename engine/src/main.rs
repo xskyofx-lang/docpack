@@ -1,5 +1,6 @@
 //! docpack build <archivo> [--project <carpeta>] [--no-pages] [--force]
 //! docpack text <archivo> --pages 4-5 [--project <carpeta>]
+//! docpack read <archivo o pack> [--section S05 [--part 2]] [--table T03 [--rows 1-50]] [--project <carpeta>]
 //! docpack find "<texto>" [--project <carpeta>] [--limit N]
 //! docpack diff <pack o documento> <pack o documento> [--project <carpeta>]
 //! docpack doctor [--project <carpeta>]
@@ -16,6 +17,7 @@ use std::path::{Path, PathBuf};
 const USAGE: &str = "Uso:
   docpack build <archivo> [--project <carpeta>] [--no-pages] [--force]
   docpack text <archivo> --pages 4-5 [--project <carpeta>]
+  docpack read <archivo o pack> [--section S05 [--part 2]] [--table T03 [--rows 1-50]] [--project <carpeta>]
   docpack find \"<texto>\" [--project <carpeta>] [--limit N] [--pack <nombre>] [--in tablas|texto] [--color <nombre o RRGGBB>]
   docpack diff <pack o documento> <pack o documento> [--project <carpeta>]
   docpack doctor [--project <carpeta>]
@@ -30,6 +32,7 @@ fn main() {
     let code = match args.first().map(String::as_str) {
         Some("build") => cmd_build(rest),
         Some("text") => cmd_text(rest),
+        Some("read") => cmd_read(rest),
         Some("find") => cmd_find(rest),
         Some("diff") => cmd_diff(rest),
         Some("doctor") => cmd_doctor(rest),
@@ -103,6 +106,24 @@ fn cmd_text(args: &[String]) -> i32 {
     let pages = match library::parse_pages(args.flags.get("pages").map(String::as_str).unwrap_or("")) { Ok(p) => p, Err(e) => { eprintln!("{e}"); return 2 } };
     let built = match build(Path::new(file), &project(&args), &Options { pages: false, force: false, in_project: args.flags.contains_key("project") }) { Ok(b) => b, Err(e) => return fail(e) };
     match library::page_text(&built.pack, &pages) { Ok(text) => { print!("{text}"); 0 } Err(e) => fail(e) }
+}
+
+/// A piece of a pack: its index, a section (or a part of it) or a table (or
+/// some of its rows). A document is packed first when needed.
+fn cmd_read(args: &[String]) -> i32 {
+    let args = parsed!(args, &["project", "section", "part", "table", "rows"], &[]);
+    let [given] = args.words.as_slice() else { eprintln!("Falta el archivo o el pack\n{USAGE}"); return 2 };
+    let part = match args.flags.get("part").map(|p| p.parse::<usize>()) {
+        None => None,
+        Some(Ok(p)) => Some(p),
+        Some(Err(_)) => { eprintln!("--part es un número desde 1\n{USAGE}"); return 2 }
+    };
+    let (project, options) = (project(&args), Options { pages: false, force: false, in_project: args.flags.contains_key("project") });
+    let pack = if Path::new(given).is_file() {
+        match build(Path::new(given), &project, &options) { Ok(b) => b.pack, Err(e) => return fail(e) }
+    } else { pack_of(&project, given, &options) };
+    let what = library::Read { section: args.flags.get("section").cloned(), part, table: args.flags.get("table").cloned(), rows: args.flags.get("rows").cloned() };
+    match library::read(&pack, &what) { Ok(text) => { print!("{text}"); 0 } Err(e) => fail(e) }
 }
 
 fn cmd_find(args: &[String]) -> i32 {
