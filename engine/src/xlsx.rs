@@ -1,8 +1,8 @@
 //! Spreadsheets: one section and one CSV table per sheet. A cell keeps its
 //! value; a formula that was never calculated (no stored value) is written as
 //! `=FORMULA` so it is not lost.
-use crate::{CellColor, Document, Mark, Section, Table};
-use calamine::Reader;
+use crate::{CellColor, Document, Finding, Mark, Section, Sheet, Table};
+use calamine::{DataType, Reader};
 use std::io::Cursor;
 
 pub fn extract(bytes: &[u8], ext: &str) -> Result<Document, String> {
@@ -38,16 +38,24 @@ pub fn extract(bytes: &[u8], ext: &str) -> Result<Document, String> {
     let mut padding = 0usize;
     // Colors only Office Open XML keeps where they can be read (.xlsx, .xlsm).
     let colors = if matches!(ext, "xlsx" | "xlsm") { crate::xlsx_color::read(bytes) } else { None };
+    // Sheets hidden from whoever opens the book, and the protection it keeps:
+    // a review must know what the book does not show or does not let edit.
+    let hidden: std::collections::HashSet<String> = book.sheets_metadata().iter().filter(|s| s.visible != calamine::SheetVisible::Visible).map(|s| s.name.clone()).collect();
+    let (book_locked, locked) = if matches!(ext, "xlsx" | "xlsm") { crate::xlsx_color::protection(bytes) } else { Default::default() };
+    let (mut errors, mut typed) = (0usize, 0usize);
     for (n, name) in names.iter().enumerate() {
         let values = book.worksheet_range(name).map_err(|e| format!("Hoja {name}: {e}"))?;
         let formulas = book.worksheet_formula(name).ok();
         let mut grid = std::collections::BTreeMap::<(u32, u32), String>::new();
+        let mut error_cells = Vec::new();
         let (vr, vc) = values.start().unwrap_or((0, 0));
         for (r, c, cell) in values.used_cells() {
             let full = cell.to_string();
             let v = full.trim_end();
             padding += full.len() - v.len();
-            if !v.is_empty() { grid.insert((vr + r as u32, vc + c as u32), v.to_string()); }
+            let at = (vr + r as u32, vc + c as u32);
+            if cell.is_error() { error_cells.push((at, v.to_string())) }
+            if !v.is_empty() { grid.insert(at, v.to_string()); }
         }
         // Every formula of the sheet: a cell without a stored value shows it in
         // the CSV; all of them go beside the table in Tnn.formulas.json.
@@ -92,19 +100,65 @@ pub fn extract(bytes: &[u8], ext: &str) -> Result<Document, String> {
                     if cell.fill.is_some() || !text.is_empty() { marked.push(CellColor { row, column, fill: cell.fill, text }) }
                 }
             }
-            let formulas_in_table = sheet_formulas.into_iter()
+            let formulas_in_table: Vec<(usize, usize, String)> = sheet_formulas.into_iter()
                 .filter(|((r, c), _)| (r0..=r1).contains(r) && (c0..=c1).contains(c))
                 .map(|((r, c), f)| ((r - r0) as usize, (c - c0) as usize, f)).collect();
             let (header_row, heading) = header_below_titles(&rows);
             let title = if heading.is_empty() { name.clone() } else { format!("{name} · {}", heading.join(" · ")) };
-            doc.tables.push(Table { title, page: Some(n as u32 + 1), pages: Vec::new(), rows, colors: marked, formulas: formulas_in_table, header_row, ..Default::default() });
+            let mut findings: Vec<Finding> = error_cells.into_iter().map(|((r, c), v)| Finding {
+                kind: "error", row: (r - r0) as usize, column: (c - c0) as usize,
+                detail: format!("La celda muestra el error {v}: su fórmula no se puede calcular (referencia rota, tipo de dato o división entre cero)."), value: v,
+            }).collect();
+            findings.extend(typed_among_formulas(&rows, &formulas_in_table, header_row));
+            errors += findings.iter().filter(|f| f.kind == "error").count();
+            typed += findings.iter().filter(|f| f.kind == "constante").count();
+            findings.sort_by_key(|f| (f.row, f.column));
+            let sheet = Sheet { name: name.clone(), origin: (r0, c0), hidden: hidden.contains(name), protected: locked.contains(name) };
+            doc.tables.push(Table { title, page: Some(n as u32 + 1), pages: Vec::new(), rows, colors: marked, formulas: formulas_in_table, header_row, sheet: Some(sheet), findings, ..Default::default() });
         }
         doc.sections.push(section);
+    }
+    let mut hidden_names: Vec<&String> = names.iter().filter(|n| hidden.contains(*n)).collect();
+    hidden_names.dedup();
+    if !hidden_names.is_empty() {
+        doc.notes.push(format!("Hojas ocultas para quien abre el libro (se extrajeron igual, con hidden en tablas/index.json): {}.", hidden_names.iter().map(|n| format!("«{n}»")).collect::<Vec<_>>().join(", ")));
+    }
+    let mut protected: Vec<&String> = names.iter().filter(|n| locked.contains(*n)).collect();
+    protected.dedup();
+    if book_locked || !protected.is_empty() {
+        let sheets = if protected.is_empty() { String::new() } else { format!(" Hojas protegidas contra edición: {}.", protected.iter().map(|n| format!("«{n}»")).collect::<Vec<_>>().join(", ")) };
+        doc.notes.push(format!("{}{sheets}", if book_locked { "El libro tiene protegida su estructura (no deja agregar, quitar ni mostrar hojas)." } else { "" }).trim().to_string());
+    }
+    if errors + typed > 0 {
+        doc.notes.push(format!("Celdas para revisar (tablas/Tnn.revision.json, con su celda como D14): {errors} con error y {typed} con un número escrito a mano en una columna calculada por fórmula."));
     }
     if padding > 0 {
         doc.notes.push(format!("Se quitaron {padding} espacios de relleno al final de las celdas (exportaciones de ancho fijo). Los espacios al inicio, que marcan sangría, se conservan."));
     }
     Ok(doc)
+}
+
+/// The numbers typed by hand where a column is calculated: a column with
+/// formulas in two or more of its rows, and between them a number with no
+/// formula (a total overwritten, a value pasted over the formula).
+fn typed_among_formulas(rows: &[Vec<String>], formulas: &[(usize, usize, String)], header_row: usize) -> Vec<Finding> {
+    let mut by_column: std::collections::BTreeMap<usize, Vec<(usize, &String)>> = Default::default();
+    for (r, c, f) in formulas { by_column.entry(*c).or_default().push((*r, f)) }
+    let mut out = Vec::new();
+    for (c, calculated) in by_column {
+        if calculated.len() < 2 { continue }
+        let (first, last) = (calculated.iter().map(|x| x.0).min().unwrap(), calculated.iter().map(|x| x.0).max().unwrap());
+        let with_formula: std::collections::HashSet<usize> = calculated.iter().map(|x| x.0).collect();
+        for r in first.max(header_row + 1)..=last {
+            if with_formula.contains(&r) { continue }
+            let Some(value) = rows.get(r).and_then(|row| row.get(c)) else { continue };
+            if value.trim().parse::<f64>().is_err() { continue }
+            // The formula of the nearest calculated row, to compare.
+            let near = calculated.iter().min_by_key(|x| x.0.abs_diff(r)).map(|x| x.1.as_str()).unwrap_or("");
+            out.push(Finding { kind: "constante", row: r, column: c, value: value.clone(), detail: format!("Número escrito a mano en una columna calculada por fórmula (la fila más cercana calcula {near})."), });
+        }
+    }
+    out
 }
 
 /// A sheet often carries its title above the table ("Inventory, 4th

@@ -35,6 +35,7 @@ Never open the original document (no file read, no script that opens it): read i
 2) Read only the sections the question needs (docpack_read section), a long one by part (part), and only the tables they name (docpack_read table, rows for a large one); tables bring their colors and formulas. \
 3) To find something without knowing where it is, docpack_find searches every pack: words, a color (rosa/pink, rojo/red, gris/gray… or RRGGBB) or only tables or text; each hit gives section or table and row, part, line and page. \
 4) docpack_text gives given pages; docpack_diff compares two versions. \
+Before auditing or reviewing several documents (requirements, absences, spreadsheets, later documents that change earlier ones), call docpack_guide once: it says how to search every way a document may word a thing (find takes several apart with |), why an empty search is not proof (find says what it could not see) and how to cite. \
 Cite section, table and page; when a page carries 'impresa N', the document numbers its pages apart: quote the printed number. An agent that can read files may open the pack's files instead (index.json, secciones/*.md, tablas/Tnn.csv, Tnn.colores.json, Tnn.formulas.json).";
 
 fn tool_definitions() -> Value {
@@ -57,7 +58,7 @@ fn tool_definitions() -> Value {
         },
         {
             "name": "docpack_read",
-            "description": "Read a document's pack by parts instead of the document. With only file: the index (sections with id, pages, tokens, tables and parts). With section (id such as S05, or its title): that section; a long one returns its parts, then ask for one with part. With table (id such as T03, or its title): its CSV rows numbered from 1 with the header, plus the formulas and colors of the rows shown; a large data table needs rows. Every piece starts with a line naming its id, title and pages (and the printed page when the document numbers its pages apart).",
+            "description": "Read a document's pack by parts instead of the document. With only file: the index (sections with id, pages, tokens, tables and parts). With section (id such as S05, or its title): that section; a long one returns its parts, then ask for one with part. With table (id such as T03, or its title): its CSV rows numbered from 1 with the header, plus the formulas, colors and review findings (cells with an error, numbers typed among formulas) of the rows shown, each with its cell for a spreadsheet; a large data table needs rows. Every piece starts with a line naming its id, title and pages (and the printed page when the document numbers its pages apart).",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -86,11 +87,11 @@ fn tool_definitions() -> Value {
         },
         {
             "name": "docpack_find",
-            "description": "Search every DocPack of the project at once. Each hit names its pack, section (or table and row), part, line and page (and printed_page when the document numbers its pages apart); then read it with docpack_read. Hits are ranked: the words as written first, then a table's title, a heading, body text, a table row; a table of contents last. Narrow with pack, in (tablas or texto) or color: only what the document marks in that color, a name in Spanish or English (rosa/pink, rojo/red, gris/gray…) or RRGGBB; with color the query may be left out.",
+            "description": "Search every DocPack of the project at once, by words (not by meaning): give every way a document may word the thing apart with |, such as 'multa | sanción | penalidad'; each hit says which one it matched (matched). Each hit names its pack, section (or table, row, column, and the sheet and cell such as D14 for a spreadsheet), part, line and page (and printed_page when the document numbers its pages apart); then read it with docpack_read. Hits are ranked: the words as written first, then a table's title, a heading, body text, a table row; a table of contents last. With no hits, not_found says what the search could not see: pages whose text may be incomplete (OCR, no text, damaged) and documents without a pack; an empty search is not proof of absence. Narrow with pack, in (tablas or texto) or color: only what the document marks in that color, a name in Spanish or English (rosa/pink, rojo/red, gris/gray…) or RRGGBB; with color the query may be left out.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
-                    "query": { "type": "string", "description": "Words to search for (optional when color is given)" },
+                    "query": { "type": "string", "description": "Words to search for; several ways of saying it apart with | (optional when color is given)" },
                     "project": project,
                     "pack": { "type": "string", "description": "Only this pack (its name: the document's file name)" },
                     "in": { "type": "string", "enum": ["tablas", "texto"], "description": "Only tables or only text" },
@@ -111,6 +112,11 @@ fn tool_definitions() -> Value {
                 },
                 "required": ["old", "new"]
             }
+        },
+        {
+            "name": "docpack_guide",
+            "description": "How to audit or review many documents with DocPack: survey and budget before reading, search every way a document may word a thing (several apart with |), requirements as checklists, later documents that change earlier ones, absence only with proof, spreadsheets (formulas, errors, typed numbers, hidden sheets), one way to cite. Read it once before such a task.",
+            "inputSchema": { "type": "object", "properties": {} }
         },
         {
             "name": "docpack_catalog",
@@ -191,6 +197,7 @@ fn call_tool(name: &str, args: &Value) -> Result<String, String> {
             let diff = library::diff(&pack_of(&proj, &local(old), &opts), &pack_of(&proj, &local(new), &opts))?;
             Ok(serde_json::to_string_pretty(&diff).unwrap_or_default())
         }
+        "docpack_guide" => Ok(docpack::AUDIT_GUIDE.to_string()),
         "docpack_catalog" => {
             let path = library::write_catalog(&proj.join("docpack"))?;
             Ok(path.display().to_string())
@@ -284,7 +291,7 @@ mod tests {
     #[test]
     fn a_byte_order_mark_or_a_bad_line_still_gets_an_answer() {
         let listed = reply_to_line("\u{feff}{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/list\"}\r").unwrap();
-        assert_eq!(listed["result"]["tools"].as_array().unwrap().len(), 7);
+        assert_eq!(listed["result"]["tools"].as_array().unwrap().len(), 8);
         let bad = reply_to_line("{bad json").unwrap();
         assert_eq!(bad["error"]["code"], -32700);
         assert!(bad["id"].is_null());
@@ -304,11 +311,13 @@ mod tests {
         let unknown = handle_message(&json!({"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"1999-01-01"}})).unwrap();
         assert_eq!(unknown["result"]["protocolVersion"], PROTOCOLS[0]);
         let list = handle_message(&json!({"jsonrpc":"2.0","id":2,"method":"tools/list"})).unwrap();
-        assert_eq!(list["result"]["tools"].as_array().unwrap().len(), 7);
+        assert_eq!(list["result"]["tools"].as_array().unwrap().len(), 8);
         // A client without the DocPack skill still learns the rule and the
         // way through a pack when it connects.
         let told = init["result"]["instructions"].as_str().unwrap();
-        assert!(told.contains("Never open the original") && told.contains("docpack_read") && told.contains("impresa"), "{told}");
+        assert!(told.contains("Never open the original") && told.contains("docpack_read") && told.contains("impresa") && told.contains("docpack_guide"), "{told}");
+        let guide = call(9, "docpack_guide", json!({}));
+        assert!(guide["content"][0]["text"].as_str().unwrap().contains("Absence needs proof"), "{guide}");
         assert!(handle_message(&json!({"jsonrpc":"2.0","method":"notifications/initialized"})).is_none(), "notifications get no reply");
     }
 

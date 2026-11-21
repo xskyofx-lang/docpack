@@ -10,6 +10,16 @@ locally (no tokens are spent converting). The original file is never changed.
 `<project>/docpack/index.json` lists every pack with its document's title,
 version and date.
 
+## Audits and reviews of many documents
+
+Before auditing or reviewing several documents (a tender with its rules,
+circulars and offers; a contract and its annexes; requirements to check;
+amounts to reconcile between a spreadsheet and a PDF), read the guide once:
+`docpack guide`, or the MCP tool `docpack_guide`. It says how to survey and
+budget the reading, how to search every way a document may word a thing,
+how to treat later documents that change earlier ones, why an empty search
+is not proof that something is missing, and how to cite.
+
 ## The rule
 
 1. **Never read the original document**: not with Read, not with `cat`, not
@@ -58,6 +68,12 @@ version and date.
      such as `=D4*E4` or `=SUMIF(Inventory!A4:A10,"VAC*",Inventory!F4:F10)`.
      The CSV keeps the value the cell shows; read the formula to say how a
      number is calculated.
+   - **Spreadsheet review.** A sheet's table names its `sheet` and the cell
+     it starts at (`origin`), and says when the sheet is `hidden` or
+     `protected`; formulas and colors carry their `celda` (`D14`).
+     `review_file` (`tablas/Tnn.revision.json`) lists the cells to check:
+     `error` (`#REF!`, `#VALUE!`…) and `constante` (a number typed by hand in
+     a column calculated by formula).
    - `paginas/pNNN.png` only when you must see a figure or a layout.
 2. **To look at given pages, use the pack**:
    ```bash
@@ -72,6 +88,13 @@ version and date.
    docpack find "vacuna antirrábica" --project "<project folder>"
    ```
    Each hit names its pack, section (or table and row), part, page and line.
+   DocPack searches **words, not meanings**: give every way a document may
+   word the thing at once, apart with `|` (`multa | sanción | penalidad`);
+   each hit says which one it matched (`matched`). A hit in a spreadsheet's
+   table also gives its `sheet` and `cell` (`D14`). When nothing is found,
+   `not_found` says what the search could not see: `doubtful_pages` (text
+   read by OCR, missing or damaged: look at their image) and `without_pack`
+   (documents not yet packed). An empty search is not proof of absence.
    Hits come ranked: the words as written first, then a table's title, a
    heading, body text and a table's row; a table of contents last. A line
    repeated word for word in a pack (a running header) is one hit with

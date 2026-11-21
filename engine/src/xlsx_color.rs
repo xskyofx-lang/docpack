@@ -186,6 +186,20 @@ fn rich_strings(zip: &mut Zip, theme: &[String], indexed: &[String], body: &str)
     out
 }
 
+/// The protection a workbook keeps: whether its structure is locked
+/// (`workbookProtection`) and the sheets locked against editing
+/// (`sheetProtection`).
+pub fn protection(bytes: &[u8]) -> (bool, std::collections::HashSet<String>) {
+    let Ok(mut zip) = ooxml::open(bytes) else { return (false, Default::default()) };
+    let locked = |xml: &str, tag: &str| xml.contains(&format!("<{tag}")) || xml.contains(&format!(":{tag}"));
+    let book = matches!(ooxml::part(&mut zip, "xl/workbook.xml"), Ok(Some(x)) if locked(&x, "workbookProtection"));
+    let mut sheets = std::collections::HashSet::new();
+    for (name, path) in sheet_parts(&mut zip) {
+        if matches!(ooxml::part(&mut zip, &path), Ok(Some(x)) if locked(&x, "sheetProtection")) { sheets.insert(name); }
+    }
+    (book, sheets)
+}
+
 /// Sheet name → part, from the workbook and its relationships.
 fn sheet_parts(zip: &mut Zip) -> HashMap<String, String> {
     let mut targets = HashMap::new();

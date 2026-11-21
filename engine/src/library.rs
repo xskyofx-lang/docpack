@@ -122,22 +122,37 @@ pub fn find(root: &Path, query: &str, limit: usize) -> Value {
 #[derive(Debug, Clone, Default)]
 pub struct Find { pub limit: usize, pub pack: Option<String>, pub only: Option<String>, pub color: Option<String> }
 
-/// Search every pack. Hits are ranked: the words as written before the words
-/// apart, and in each a table's title, then a heading, then body text, then a
-/// table's row; a table of contents last. A line repeated word for word in one pack (a running
-/// header) is one hit with its `count`. With `color`, only text or cells in
-/// that color, and the query may be empty.
+/// Whether a word of the text (folded) is `word`: a number whole, a word by
+/// its start ("multa" finds "multas").
+fn word_in(have: &[&str], word: &str) -> bool {
+    have.iter().any(|h| if word.chars().all(|c| c.is_ascii_digit()) { h == &word } else { h.starts_with(word) })
+}
+
+/// Search every pack. The query may give several ways of saying one thing
+/// apart with `|` ("multa | sanción | penalidad"): a place that says any of
+/// them is a hit, and names the one it says (`matched`). Hits are ranked: the
+/// words as written before the words apart, and in each a table's title, then
+/// a heading, then body text, then a table's row; a table of contents last. A
+/// line repeated word for word in one pack (a running header) is one hit with
+/// its `count`. With `color`, only text or cells in that color, and the query
+/// may be empty. Without hits, the answer says what the search could not see
+/// (pages whose text may be incomplete, documents without a pack): an empty
+/// search is not proof that a document does not say something.
 pub fn find_with(root: &Path, query: &str, opts: &Find) -> Value {
-    let folded = fold(query);
-    let words: Vec<String> = tokens(&folded).into_iter().map(str::to_string).collect();
-    // 0: the query as written; 1: all its words; None: not a match.
-    let rank = |text: &str| -> Option<u8> {
-        if words.is_empty() { return Some(1) }
+    // Each way of saying it: as written (folded) and its words.
+    let ways: Vec<(String, String, Vec<String>)> = query.split('|').map(str::trim).filter(|w| !w.is_empty())
+        .map(|w| { let f = fold(w); let words = tokens(&f).into_iter().map(str::to_string).collect(); (w.to_string(), f, words) })
+        .filter(|(_, _, words): &(String, String, Vec<String>)| !words.is_empty()).collect();
+    let words: Vec<String> = ways.iter().flat_map(|w| w.2.clone()).collect();
+    // (0: one way as written, 1: all its words; which way); None: no match.
+    let rank = |text: &str| -> Option<(u8, usize)> {
+        if ways.is_empty() { return Some((1, 0)) }
         let t = fold(text);
         let have = tokens(&t);
-        let all = words.iter().all(|w| have.iter().any(|h| if w.chars().all(|c| c.is_ascii_digit()) { h == w } else { h.starts_with(w.as_str()) }));
-        all.then(|| if t.contains(&folded) { 0 } else { 1 })
+        ways.iter().enumerate().filter(|(_, (_, _, words))| words.iter().all(|w| word_in(&have, w)))
+            .map(|(k, (_, folded, _))| (if t.contains(folded.as_str()) { 0 } else { 1 }, k)).min()
     };
+    let matched = |hit: &mut Value, way: usize| if ways.len() > 1 { hit["matched"] = json!(ways[way].0) };
     // A color by its hex value or by its name, in Spanish or English
     // (`rosa` or `pink`): the pack names colors in Spanish.
     let asked_name = opts.color.as_deref().and_then(crate::color::named);
@@ -173,7 +188,7 @@ pub fn find_with(root: &Path, query: &str, opts: &Find) -> Value {
                     if line.starts_with("<!--") { continue }
                     if opts.color.is_some() && !marked_colors(line).iter().any(|h| wanted(h)) { continue }
                     let plain = crate::color::strip_tags(line);
-                    let Some(r) = rank(&plain) else { continue };
+                    let Some((r, way)) = rank(&plain) else { continue };
                     let heading = plain.starts_with('#');
                     let leaders = contents || plain.contains("....");
                     let score = r * 4 + if heading { 1 } else { 2 } + if leaders { 8 } else { 0 };
@@ -181,6 +196,7 @@ pub fn find_with(root: &Path, query: &str, opts: &Find) -> Value {
                     let (page, printed) = page_at(&lines, n, section);
                     let mut hit = json!({"pack": pack, "section": section["id"], "title": section["title"], "file": file, "line": n + 1, "part": part, "page": page, "text": snippet(&plain)});
                     if let Some(p) = printed { hit["printed_page"] = json!(p) }
+                    matched(&mut hit, way);
                     add(score, order, fold(&plain), hit, &mut hits);
                 }
             }
@@ -191,19 +207,30 @@ pub fn find_with(root: &Path, query: &str, opts: &Find) -> Value {
                 let title = table["title"].as_str().unwrap_or("");
                 // Its title is where a table is found by name.
                 if opts.color.is_none() && !words.is_empty() {
-                    if let Some(r) = rank(title) {
-                        add(r * 4, order, format!("T:{}", table["id"]), with_printed(json!({"pack": pack, "table": table["id"], "title": title, "file": file, "page": table["page"], "section": table["section"], "text": snippet(title)}), table), &mut hits);
+                    if let Some((r, way)) = rank(title) {
+                        let mut hit = with_printed(json!({"pack": pack, "table": table["id"], "title": title, "file": file, "page": table["page"], "section": table["section"], "sheet": table["sheet"], "text": snippet(title)}), table);
+                        matched(&mut hit, way);
+                        add(r * 4, order, format!("T:{}", table["id"]), hit, &mut hits);
                     }
                 }
                 let Ok(text) = std::fs::read_to_string(dir.join(file)) else { continue };
                 let rows = csv_rows(&text);
+                // A spreadsheet's table names its cells as the sheet does.
+                let origin = table["origin"].as_str().and_then(cell_position);
                 // With a color: the cells in it, with the pieces in that color.
                 let colored: Option<Vec<Value>> = opts.color.as_ref().map(|_| table["colores_file"].as_str()
                     .and_then(|f| read_json(&dir.join(f))).and_then(|v| v.as_array().cloned()).unwrap_or_default());
                 for (r, row) in rows.iter().enumerate() {
                     let joined = row.join(" | ");
-                    let Some(score) = rank(&joined) else { continue };
-                    let mut hit = with_printed(json!({"pack": pack, "table": table["id"], "title": title, "file": file, "row": r + 1, "page": table["page"], "section": table["section"], "text": snippet(&joined)}), table);
+                    let Some((score, way)) = rank(&joined) else { continue };
+                    let mut hit = with_printed(json!({"pack": pack, "table": table["id"], "title": title, "file": file, "row": r + 1, "page": table["page"], "section": table["section"], "sheet": table["sheet"], "text": snippet(&joined)}), table);
+                    // The cell that says it: the first with a word of the way
+                    // that matched (column from 0, as in the CSV).
+                    if let Some(c) = ways.get(way).and_then(|w| row.iter().position(|cell| { let f = fold(cell); let have = tokens(&f); w.2.iter().any(|x| word_in(&have, x)) })) {
+                        hit["column"] = json!(c);
+                        if let Some((r0, c0)) = origin { hit["cell"] = json!(cell_name(r0 + r as u32, c0 + c as u32)) }
+                    }
+                    matched(&mut hit, way);
                     if let Some(cells) = &colored {
                         let mut found = Vec::new();
                         for c in cells.iter().filter(|c| c["fila"].as_u64() == Some(r as u64)) {
@@ -227,7 +254,64 @@ pub fn find_with(root: &Path, query: &str, opts: &Find) -> Value {
     hits.sort_by_key(|h| (h.0, h.1));
     let total = hits.len();
     let shown: Vec<Value> = hits.into_iter().take(opts.limit.max(1)).map(|h| h.2).collect();
-    json!({"query": query, "color": opts.color, "total": total, "shown": shown.len(), "hits": shown})
+    let mut out = json!({"query": query, "color": opts.color, "total": total, "shown": shown.len(), "hits": shown});
+    if total == 0 { out["not_found"] = unseen(root, opts, ways.len()) }
+    out
+}
+
+/// What an empty search could not see: the pages of the packs searched whose
+/// text may be incomplete (read by OCR, without text, damaged), and the
+/// project's documents without a pack. Said so that "it is not there" is
+/// only concluded where the search could look.
+fn unseen(root: &Path, opts: &Find, ways: usize) -> Value {
+    let mut doubtful = serde_json::Map::new();
+    let mut searched = 0;
+    for (dir, manifest) in packs(root) {
+        let pack = name_of(&dir);
+        if opts.pack.as_deref().is_some_and(|p| !fold(&pack).contains(&fold(p))) { continue }
+        searched += 1;
+        if let Some(pages) = manifest["doubtful_pages"].as_object().filter(|p| !p.is_empty()) { doubtful.insert(pack, json!(pages)); }
+    }
+    let project = root.parent().unwrap_or(root);
+    let without: Vec<String> = documents_without_pack(project).iter().map(|p| p.strip_prefix(project).unwrap_or(p).to_string_lossy().into_owned()).collect();
+    let mut note = format!("Sin resultados en {searched} pack{}. Esto no prueba que el documento no lo diga:", if searched == 1 { "" } else { "s" });
+    if ways == 1 { note.push_str(" busca también otras formas de decirlo (sinónimos, singular o plural, abreviaturas) separadas por |;") }
+    if !doubtful.is_empty() { note.push_str(" en doubtful_pages hay páginas cuyo texto puede estar incompleto (ocr: leído por OCR; sin_texto: imagen sin texto legible; texto_dañado: letras que no se pudieron leer): revisa su imagen (paginas/pNNN.png) o su texto antes de concluir;") }
+    if !without.is_empty() { note.push_str(" hay documentos sin pack (without_pack) que esta búsqueda no ve: constrúyelos y busca de nuevo;") }
+    let note = note.trim_end_matches(';').to_string() + ".";
+    crate::compact(json!({"note": note, "packs_searched": searched, "doubtful_pages": doubtful, "without_pack": without}))
+}
+
+/// The project's documents without a pack (hidden folders, files the
+/// project's .docpackignore names and the packs themselves aside).
+fn documents_without_pack(project: &Path) -> Vec<PathBuf> {
+    let root = project.join("docpack");
+    let mut out = Vec::new();
+    let mut stack = vec![project.to_path_buf()];
+    while let Some(dir) = stack.pop() {
+        for entry in std::fs::read_dir(&dir).into_iter().flatten().flatten() {
+            let path = entry.path();
+            if name_of(&path).starts_with('.') || path == root { continue }
+            if path.is_dir() { stack.push(path) } else if supported(&path) && !ignored(project, &path) && !pack_dir(project, &path).join("manifest.json").is_file() { out.push(path) }
+        }
+    }
+    out.sort();
+    out
+}
+
+/// "D14" for a sheet's cell (row and column from 0).
+pub fn cell_name(row: u32, column: u32) -> String {
+    let (mut index, mut letters) = (column + 1, String::new());
+    while index > 0 { let r = (index - 1) % 26; letters.insert(0, (b'A' + r as u8) as char); index = (index - 1) / 26; }
+    format!("{letters}{}", row + 1)
+}
+
+/// "D14" → (row 13, column 3).
+fn cell_position(name: &str) -> Option<(u32, u32)> {
+    let letters: String = name.chars().take_while(|c| c.is_ascii_alphabetic()).collect();
+    let row: u32 = name[letters.len()..].parse().ok()?;
+    let column = letters.to_ascii_uppercase().bytes().try_fold(0u32, |acc, b| acc.checked_mul(26)?.checked_add((b - b'A' + 1) as u32))?;
+    Some((row.checked_sub(1)?, column.checked_sub(1)?))
 }
 
 /// The colors a section line marks with (`<span style="color:#…">`,
@@ -363,19 +447,7 @@ pub fn doctor(project: &Path) -> Value {
             Ok(_) => {}
         }
     }
-    // Documents of the project without a pack (hidden folders and the packs
-    // themselves aside).
-    let mut stack = vec![project.to_path_buf()];
-    while let Some(dir) = stack.pop() {
-        for entry in std::fs::read_dir(&dir).into_iter().flatten().flatten() {
-            let path = entry.path();
-            let name = name_of(&path);
-            if name.starts_with('.') || path == root { continue }
-            if path.is_dir() { stack.push(path) } else if supported(&path) && !ignored(project, &path) && !pack_dir(project, &path).join("manifest.json").is_file() {
-                problem("no_pack", &path, "Documento sin pack.".into());
-            }
-        }
-    }
+    for path in documents_without_pack(project) { problem("no_pack", &path, "Documento sin pack.".into()) }
     json!({"packs": count, "problems": problems.len(), "list": problems})
 }
 
@@ -467,14 +539,18 @@ pub fn read(pack: &Path, what: &Read) -> Result<String, String> {
         };
         let last_page = table["pages"].as_array().and_then(|p| p.last()).and_then(Value::as_u64);
         let shown = if chosen.len() < rows.len() { format!(", se muestran {}", chosen.len()) } else { String::new() };
-        let mut out = format!("<!-- {} · {}{} · {} filas{shown} · {file} -->\n", table["id"].as_str().unwrap_or(""), table["title"].as_str().unwrap_or(""),
+        // A sheet's table names its sheet, the cell it starts at, and whether
+        // the sheet is hidden or protected.
+        let sheet = table["sheet"].as_str().map(|s| format!(" · hoja «{s}» desde {}{}{}", table["origin"].as_str().unwrap_or("A1"),
+            if table["hidden"] == true { " · oculta" } else { "" }, if table["protected"] == true { " · protegida" } else { "" })).unwrap_or_default();
+        let mut out = format!("<!-- {} · {}{}{sheet} · {} filas{shown} · {file} -->\n", table["id"].as_str().unwrap_or(""), table["title"].as_str().unwrap_or(""),
             pages_label(table["page"].as_u64(), last_page.or(table["page"].as_u64()), table["printed_page"].as_str()), rows.len());
         for &r in &chosen {
             out.push_str(&format!("{}: {}\n", r + 1, rows[r].iter().map(|c| crate::csv_cell(c)).collect::<Vec<_>>().join(",")));
         }
-        // Its formulas and colors, for the rows shown (fila from 0, as in
-        // the CSV).
-        for (key, label) in [("formulas_file", "Fórmulas"), ("colores_file", "Colores")] {
+        // Its formulas, colors and review findings, for the rows shown (fila
+        // from 0, as in the CSV; celda as the sheet names it).
+        for (key, label) in [("formulas_file", "Fórmulas"), ("colores_file", "Colores"), ("review_file", "Para revisar")] {
             let Some(cells) = table[key].as_str().and_then(|f| read_json(&pack.join(f))).and_then(|v| v.as_array().cloned()) else { continue };
             let picked: Vec<&Value> = cells.iter().filter(|c| c["fila"].as_u64().is_some_and(|f| chosen.contains(&(f as usize)))).collect();
             if !picked.is_empty() { out.push_str(&format!("\n{label} (fila y columna desde 0, como en el CSV):\n{}\n", serde_json::to_string(&picked).unwrap_or_default())) }

@@ -538,11 +538,13 @@ salida es un JSON con la ruta del pack y sus números.
 | `docpack text diseno.pdf --pages 4-5` | El texto de esas páginas, desde el pack, sin abrir el original |
 | `docpack read diseno.pdf [--section S05 [--part 2]] [--table T03 [--rows 1-50]]` | El índice (con las notas del pack), una sección o una parte de ella, o una tabla con sus fórmulas y colores: para un agente sin lector de archivos |
 | `docpack find "ciclo de compensación"` | Buscar en todos los packs del proyecto: pack, sección o tabla, parte, página y línea. Primero lo escrito tal cual y los títulos de tabla y subtítulos; el índice de contenido al final; una línea repetida en cada página es un solo resultado. Filtros: `--pack`, `--in tablas` o `--in texto` |
+| `docpack find "multa \| sanción \| penalidad"` | Varias formas de decir lo mismo en una sola búsqueda; cada resultado dice cuál encontró. Sin resultados, dice lo que la búsqueda no pudo ver (páginas leídas por OCR o sin texto, documentos sin pack) |
+| `docpack guide` | Cómo auditar muchos documentos con DocPack: para el agente (también la herramienta MCP `docpack_guide`) |
 | `docpack find --color rosa` | Lo que el documento marca en ese color: el nombre en español o en inglés (`rosa`, `pink`) o el hex (`--color FF00FF`); las celdas y los pedazos de texto, con o sin texto a buscar |
 | `docpack diff diseno_v1.3.docx diseno_v1.4.docx` | Qué cambió entre dos versiones: secciones y filas de tablas |
 | `docpack doctor` | Packs a medias o desactualizados, archivos ajenos en `docpack/` y documentos sin pack |
 | `docpack catalog` | Rehace `docpack/index.json` (se actualiza solo con cada pack) |
-| `docpack mcp` | Servidor MCP por stdio con `docpack_build`, `docpack_read`, `docpack_text`, `docpack_find`, `docpack_diff`, `docpack_catalog` y `docpack_doctor` |
+| `docpack mcp` | Servidor MCP por stdio con `docpack_build`, `docpack_read`, `docpack_text`, `docpack_find`, `docpack_diff`, `docpack_guide`, `docpack_catalog` y `docpack_doctor` |
 
 Todos aceptan `--project <carpeta>`. Un archivo `.docpackignore` en el proyecto
 (un patrón por línea, por ejemplo `exportacion_*.xls`) deja fuera los

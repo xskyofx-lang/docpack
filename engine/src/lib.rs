@@ -23,6 +23,11 @@ mod xlsx;
 mod xlsx_color;
 
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
+
+/// How to audit many documents with DocPack (guide/audit.md): what an agent
+/// that did not design DocPack needs to use it well. `docpack guide` and the
+/// MCP tool `docpack_guide` give it.
+pub const AUDIT_GUIDE: &str = include_str!("../guide/audit.md");
 /// Formats DocPack reads.
 pub const FORMATS: &[&str] = &["pdf", "docx", "docm", "xlsx", "xlsm", "xls", "xlsb", "ods", "pptx"];
 /// Larger files are refused: a document is read whole into memory.
@@ -72,7 +77,22 @@ pub struct Table {
     /// The row of the CSV that holds the column names: 0, or the row below
     /// the title lines a sheet carries above its table.
     pub header_row: usize,
+    /// A spreadsheet's table: its sheet, the sheet's cell the CSV starts at
+    /// (row, column from 0), and whether the sheet is hidden or protected.
+    pub sheet: Option<Sheet>,
+    /// What a review of its cells should look at (a spreadsheet's errors and
+    /// numbers typed among formulas), each at its place in the CSV.
+    pub findings: Vec<Finding>,
 }
+
+/// The sheet a spreadsheet's table comes from.
+#[derive(Debug, Clone, Default)]
+pub struct Sheet { pub name: String, pub origin: (u32, u32), pub hidden: bool, pub protected: bool }
+
+/// A cell a review should look at: what it is (`error`, `constante`), its
+/// row and column in the CSV, the value it shows and why.
+#[derive(Debug, Clone, Default)]
+pub struct Finding { pub kind: &'static str, pub row: usize, pub column: usize, pub value: String, pub detail: String }
 
 /// A piece of text in a color (or on a highlight) that marks it.
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -113,6 +133,11 @@ pub struct Document {
     /// The number printed on a page when it is not its place in the file
     /// ("9" on the PDF's page 11): what the document is quoted by.
     pub printed: std::collections::BTreeMap<u32, String>,
+    /// Pages whose text may not be the whole page, and why: `ocr` (read by
+    /// OCR), `sin_texto` (no readable text), `texto_dañado` (letters the PDF
+    /// cannot convert), `imagen_sin_ocr` (a large picture OCR could not read).
+    /// A search that finds nothing says so.
+    pub doubtful_pages: std::collections::BTreeMap<u32, &'static str>,
 }
 
 /// A document's own title, version and date (its properties; the version
@@ -407,12 +432,15 @@ fn write_pack(dir: &Path, source: &Path, bytes: &[u8], sha: &str, mut doc: Docum
         let pages = (table.pages.len() > 1).then_some(&table.pages);
         let tokens = tokens_estimate(&csv);
         // A table larger than a section's part is data: filtered, not read.
+        // A spreadsheet's cell as its sheet names it ("D14"), from its place
+        // in the CSV.
+        let cell = |r: usize, c: usize| table.sheet.as_ref().map(|s| library::cell_name(s.origin.0 + r as u32, s.origin.1 + c as u32));
         let query = (tokens > PART_TOKENS * 10).then_some("Tabla de datos grande: no la leas entera; fíltrala o resúmela con un script sobre el CSV (encabezado en header).");
         // Its colors beside it: which cells, which fill, which words.
         let (colors_file, colors) = if table.colors.is_empty() { (None, serde_json::Value::Null) } else {
             let path = format!("tablas/{id}.colores.json");
             let cells: Vec<serde_json::Value> = table.colors.iter().map(|c| compact(serde_json::json!({
-                "fila": c.row, "columna": c.column, "fondo": c.fill.as_deref().map(color::label),
+                "fila": c.row, "columna": c.column, "celda": cell(c.row, c.column), "fondo": c.fill.as_deref().map(color::label),
                 "texto": c.text.iter().map(|m| compact(serde_json::json!({"texto": m.text, "color": m.color.as_deref().map(color::label), "resaltado": m.fill.as_deref().map(color::label)}))).collect::<Vec<_>>(),
             }))).collect();
             std::fs::write(staging.join(&path), serde_json::to_string(&cells).map_err(|e| e.to_string())?).map_err(io)?;
@@ -430,11 +458,21 @@ fn write_pack(dir: &Path, source: &Path, bytes: &[u8], sha: &str, mut doc: Docum
         // how it is calculated.
         let (formulas_file, formulas) = if table.formulas.is_empty() { (None, None) } else {
             let path = format!("tablas/{id}.formulas.json");
-            let cells: Vec<serde_json::Value> = table.formulas.iter().map(|(row, column, formula)| serde_json::json!({"fila": row, "columna": column, "formula": formula})).collect();
+            let cells: Vec<serde_json::Value> = table.formulas.iter().map(|(row, column, formula)| compact(serde_json::json!({"fila": row, "columna": column, "celda": cell(*row, *column), "formula": formula}))).collect();
             std::fs::write(staging.join(&path), serde_json::to_string(&cells).map_err(|e| e.to_string())?).map_err(io)?;
             (Some(path), Some(table.formulas.len()))
         };
-        table_entries.push(compact(serde_json::json!({"id": id, "title": table.title.trim(), "section": owner.get(&i).cloned(), "page": table.page, "printed_page": table.page.and_then(|p| doc.printed.get(&p)), "pages": pages, "rows": table.rows.len(), "columns": columns, "header": header, "header_row": header_row, "file": file, "tokens_estimate": tokens, "read": query, "check": table.check, "colores": colors, "colores_file": colors_file, "formulas": formulas, "formulas_file": formulas_file})));
+        // What a review of its cells should look at, beside it.
+        let (review_file, review) = if table.findings.is_empty() { (None, None) } else {
+            let path = format!("tablas/{id}.revision.json");
+            let cells: Vec<serde_json::Value> = table.findings.iter().map(|f| compact(serde_json::json!({"tipo": f.kind, "fila": f.row, "columna": f.column, "celda": cell(f.row, f.column), "valor": f.value, "detalle": f.detail}))).collect();
+            std::fs::write(staging.join(&path), serde_json::to_string(&cells).map_err(|e| e.to_string())?).map_err(io)?;
+            let mut count: std::collections::BTreeMap<&str, usize> = Default::default();
+            for f in &table.findings { *count.entry(f.kind).or_default() += 1 }
+            (Some(path), Some(count))
+        };
+        let sheet = table.sheet.as_ref();
+        table_entries.push(compact(serde_json::json!({"id": id, "sheet": sheet.map(|s| &s.name), "origin": cell(0, 0), "hidden": sheet.is_some_and(|s| s.hidden).then_some(true), "protected": sheet.is_some_and(|s| s.protected).then_some(true), "review": review, "review_file": review_file, "title": table.title.trim(), "section": owner.get(&i).cloned(), "page": table.page, "printed_page": table.page.and_then(|p| doc.printed.get(&p)), "pages": pages, "rows": table.rows.len(), "columns": columns, "header": header, "header_row": header_row, "file": file, "tokens_estimate": tokens, "read": query, "check": table.check, "colores": colors, "colores_file": colors_file, "formulas": formulas, "formulas_file": formulas_file})));
     }
     let mut section_entries = Vec::new();
     let mut total = 0u64;
@@ -582,6 +620,7 @@ fn write_pack(dir: &Path, source: &Path, bytes: &[u8], sha: &str, mut doc: Docum
         "options": {"pages": options.pages},
         "stats": {"sections": section_entries.len(), "tables": table_entries.len(), "figures": figure_entries.len(), "page_images": page_images.len(), "tokens_total_estimate": total},
         "notes": doc.notes,
+        "doubtful_pages": doc.doubtful_pages.iter().map(|(p, r)| (p.to_string(), *r)).collect::<std::collections::BTreeMap<_, _>>(),
         "colores": legend,
         "original_unchanged": true,
     });

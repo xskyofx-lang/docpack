@@ -1,5 +1,35 @@
 # Cambios
 
+## 0.4.10
+
+Sigue la mejora propuesta por Juan González Salazar, ahora con un
+expediente de un centenar de documentos.
+
+- Guía de uso para los modelos: `docpack guide` y la herramienta MCP
+  `docpack_guide` explican cómo auditar muchos documentos: mirar el conjunto
+  y repartir la lectura antes de abrir, buscar todas las formas de decir una
+  cosa, revisar requisitos como listas de componentes, tomar en cuenta los
+  documentos posteriores que cambian a los anteriores, no dar algo por
+  ausente sin prueba, revisar hojas de cálculo y citar siempre igual. El
+  MCP la ofrece al conectarse y las skills la mencionan.
+- `find` acepta varias formas de decir lo mismo separadas con `|`
+  (`multa | sanción | penalidad`), y cada resultado dice cuál encontró
+  (`matched`).
+- Una búsqueda sin resultados dice lo que no pudo ver (`not_found`): las
+  páginas de esos packs cuyo texto puede estar incompleto y los documentos
+  del proyecto sin pack. Un «no está» deja de parecer prueba.
+- Páginas dudosas (`doubtful_pages` en el manifiesto): `ocr`, `sin_texto`,
+  `texto_dañado` (letras que el PDF no sabe convertir) e `imagen_sin_ocr`.
+  Una página con texto dañado pasa por OCR. Una página con su propio texto y
+  una imagen grande con texto (un certificado escaneado pegado) conserva su
+  texto y suma, por OCR, solo las líneas que no tenía.
+- Excel: cada tabla dice su hoja y la celda donde empieza, y si la hoja está
+  oculta o protegida; el manifiesto avisa si el libro protege su estructura.
+  `tablas/Tnn.revision.json` lista las celdas con error (`#REF!`,
+  `#VALUE!`…) y los números escritos a mano en una columna calculada por
+  fórmula. Fórmulas, colores y celdas para revisar llevan su `celda` (`D14`),
+  y un resultado de `find` en una hoja trae `sheet`, `column` y `cell`.
+
 ## 0.4.9
 
 Se atiende la mejora propuesta por Juan González Salazar tras auditar con

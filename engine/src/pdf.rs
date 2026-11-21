@@ -927,6 +927,31 @@ fn leader_lines(page: &Page) -> HashSet<usize> {
     }).flatten().collect()
 }
 
+/// Text a font without its letter map turned into marks no one wrote: the
+/// replacement mark, characters of private use or control characters, in a
+/// tenth or more of what the page shows.
+fn damaged(text: &str) -> bool {
+    let shown: Vec<char> = text.chars().filter(|c| !c.is_whitespace()).collect();
+    let bad = shown.iter().filter(|&&c| c == '\u{fffd}' || ('\u{e000}'..='\u{f8ff}').contains(&c) || c >= '\u{f0000}' || c.is_control()).count();
+    !shown.is_empty() && bad * 10 >= shown.len()
+}
+
+/// The lines of an OCR text the page's own text does not have (what is
+/// written in its images): those with most of their pairs of words in a row
+/// missing from it. Pairs, not words: a certificate's "Certificado de
+/// experiencia" is new even when the page says "certificado" and
+/// "experiencia" apart; a line of the page OCR read again, with a letter
+/// misread, still has most of its pairs.
+fn lines_not_in(ocr: &str, own: &str) -> Vec<String> {
+    let words = |t: &str| crate::library::fold(t).split(|c: char| !c.is_alphanumeric()).filter(|w| !w.is_empty()).map(str::to_string).collect::<Vec<_>>();
+    let pairs = |w: &[String]| -> Vec<String> { if w.len() == 1 { w.to_vec() } else { w.windows(2).map(|p| p.join(" ")).collect() } };
+    let known: HashSet<String> = color::strip_tags(own).lines().flat_map(|l| pairs(&words(l))).collect();
+    ocr.lines().filter(|l| {
+        let p = pairs(&words(l));
+        !p.is_empty() && p.iter().filter(|x| !known.contains(*x)).count() * 2 > p.len()
+    }).map(|l| l.trim().to_string()).collect()
+}
+
 /// The value of a Roman numeral written the usual way ("iv" → 4, "XII" →
 /// 12); None for any other word, even one of its letters ("civil", "mix").
 fn roman(text: &str) -> Option<u32> {
@@ -1225,28 +1250,80 @@ pub fn extract(bytes: &[u8]) -> Result<Document, String> {
     check.dedup();
     doc.check_pages = check;
 
-    // A page that is mostly a picture (a scan, a photo of a page) is read by
-    // OCR; its text replaces the page's own only when OCR finds more letters.
+    // Pages whose own text is not the whole page go to OCR: a page that is
+    // mostly a picture (a scan, a photo of a page), whose OCR text replaces
+    // its own when it finds more letters; a page with a large picture beside
+    // its text (a scanned certificate pasted in), which keeps its text and
+    // gains the OCR lines it does not have; and a page whose text came out
+    // damaged (a font without its letter map), which OCR replaces when it
+    // reads more. A logo or a signature is smaller than a quarter of a page.
     let letters = |t: &str| t.chars().filter(|c| c.is_alphanumeric()).count();
-    let pictures: Vec<u32> = collector.pages.iter().enumerate().filter(|(_, p)| p.area > 0.0 && p.image_area >= p.area / 2.0).map(|(i, _)| i as u32 + 1).collect();
+    let is_picture = |p: &Page| p.area > 0.0 && p.image_area >= p.area / 2.0;
+    let pictures: Vec<u32> = collector.pages.iter().enumerate().filter(|(_, p)| is_picture(p)).map(|(i, _)| i as u32 + 1).collect();
+    let partial: Vec<u32> = collector.pages.iter().enumerate().filter(|(_, p)| !is_picture(p) && p.area > 0.0 && p.image_area >= p.area / 4.0).map(|(i, _)| i as u32 + 1).collect();
+    let damaged_pages: Vec<u32> = pages_text.iter().enumerate().filter(|(i, t)| !pictures.contains(&(*i as u32 + 1)) && damaged(&color::strip_tags(t))).map(|(i, _)| i as u32 + 1).collect();
+    let mut asked: Vec<u32> = pictures.iter().chain(&partial).chain(&damaged_pages).copied().collect();
+    asked.sort();
+    asked.dedup();
     let mut by_ocr = HashSet::new();
-    if !pictures.is_empty() {
-        match crate::render::ocr(bytes, &pictures) {
+    let mut ocr_ran = false;
+    let mut doubtful: std::collections::BTreeMap<u32, &'static str> = unreadable.iter().map(|&n| (n, "sin_texto")).collect();
+    if !asked.is_empty() {
+        match crate::render::ocr(bytes, &asked) {
             Ok(ocr) => {
+                ocr_ran = true;
+                let mut added = Vec::new();
                 for (n, text) in ocr.pages {
                     let i = (n - 1) as usize;
-                    if letters(&text) > letters(&pages_text[i]) { pages_text[i] = text; by_ocr.insert(n); }
+                    if partial.contains(&n) && !damaged_pages.contains(&n) {
+                        let extra = lines_not_in(&text, &pages_text[i]);
+                        if !extra.is_empty() {
+                            pages_text[i] = format!("{}\n\n<!-- texto de las imágenes de esta página, por OCR -->\n{}", pages_text[i].trim_end(), extra.join("\n"));
+                            by_ocr.insert(n);
+                            added.push(n);
+                        }
+                    } else if letters(&text) > letters(&color::strip_tags(&pages_text[i])) {
+                        pages_text[i] = text;
+                        by_ocr.insert(n);
+                    }
                 }
-                if !by_ocr.is_empty() {
-                    let mut used: Vec<u32> = by_ocr.iter().copied().collect();
-                    used.sort();
+                let mut used: Vec<u32> = by_ocr.iter().copied().collect();
+                used.sort();
+                if !used.is_empty() {
                     doc.notes.push(format!("Texto de {} leído con {} sobre la imagen de la página: puede tener errores de reconocimiento.", pages_list(&used), ocr.engine));
                     doc.ocr = Some(ocr.engine);
                 }
+                if !added.is_empty() {
+                    doc.notes.push(format!("En {} el texto de una imagen grande se agregó por OCR al final de la página, después del texto propio.", pages_list(&added)));
+                }
             }
-            Err(e) => doc.notes.push(format!("No se pudo leer el texto de {}, que {} ({e}): mira paginas/.", pages_list(&pictures), if pictures.len() == 1 { "es una imagen" } else { "son imágenes" })),
+            Err(e) => {
+                if !pictures.is_empty() {
+                    doc.notes.push(format!("No se pudo leer el texto de {}, que {} ({e}): mira paginas/.", pages_list(&pictures), if pictures.len() == 1 { "es una imagen" } else { "son imágenes" }));
+                }
+                doc.notes.push(format!("Sin OCR ({e}): las imágenes con texto de estas páginas no se leyeron."));
+            }
         }
     }
+    for &n in &asked {
+        let i = (n - 1) as usize;
+        let reason = if by_ocr.contains(&n) { "ocr" }
+            else if damaged(&color::strip_tags(&pages_text[i])) { "texto_dañado" }
+            else if pictures.contains(&n) && letters(&color::strip_tags(&pages_text[i])) == 0 { "sin_texto" }
+            else if partial.contains(&n) || pictures.contains(&n) { "imagen_sin_ocr" }
+            else { continue };
+        // A page OCR read and found nothing new in keeps its own text.
+        if reason == "imagen_sin_ocr" && ocr_ran { continue }
+        doubtful.insert(n, reason);
+    }
+    let still_damaged: Vec<u32> = doubtful.iter().filter(|(_, r)| **r == "texto_dañado").map(|(n, _)| *n).collect();
+    if !still_damaged.is_empty() {
+        doc.notes.push(format!("El texto de {} salió dañado (letras que el PDF no sabe convertir) y el OCR no lo mejoró: mira la imagen de la página.", pages_list(&still_damaged)));
+    }
+    doc.check_pages.extend(doubtful.iter().filter(|(_, r)| **r != "ocr").map(|(n, _)| *n));
+    doc.check_pages.sort();
+    doc.check_pages.dedup();
+    doc.doubtful_pages = doubtful;
     // Bookmarks below level 2 are the document's own subheadings (a field, a
     // subfield): their line on their page becomes a Markdown heading, so a long
     // section is read, cut in parts and searched by them. Of several lines with
@@ -1332,6 +1409,22 @@ mod tests {
         for yes in ["12", "- 3 -", "1088", "iv", "XII"] { assert!(page_number(yes), "{yes:?}") }
         // On a page set sideways each letter is a line of its own in the margin.
         for no in ["R", "e", "V S", "ab", "12345", ""] { assert!(!page_number(no), "{no:?}") }
+    }
+
+    #[test]
+    fn text_a_font_could_not_convert_is_damaged() {
+        assert!(damaged("\u{fffd}\u{fffd}\u{fffd} \u{e001}\u{e002}ab"));
+        assert!(!damaged("El contratista deberá entregar un reporte mensual."));
+        assert!(!damaged(""));
+    }
+
+    #[test]
+    fn ocr_adds_only_the_lines_the_page_does_not_have() {
+        let own = "Anexo 4: experiencia del oferente\nSe adjunta el certificado emitido por el mandante.";
+        // The page's own lines read again (one letter misread) are not new;
+        // the certificate's are, though its words appear apart in the page.
+        let ocr = "Anexo 4: experiencia del oferente\nSe adjunta el certificado emitido por el mandarte.\nCERTIFICADO DE EXPERIENCIA\nObra ejecutada de marzo a julio";
+        assert_eq!(lines_not_in(ocr, own), ["CERTIFICADO DE EXPERIENCIA", "Obra ejecutada de marzo a julio"]);
     }
 
     #[test]

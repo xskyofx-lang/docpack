@@ -1,6 +1,7 @@
 //! docpack build <archivo> [--project <carpeta>] [--no-pages] [--force]
 //! docpack text <archivo> --pages 4-5 [--project <carpeta>]
 //! docpack read <archivo o pack> [--section S05 [--part 2]] [--table T03 [--rows 1-50]] [--project <carpeta>]
+//! docpack guide              (how to audit many documents with DocPack)
 //! docpack find "<texto>" [--project <carpeta>] [--limit N]
 //! docpack diff <pack o documento> <pack o documento> [--project <carpeta>]
 //! docpack doctor [--project <carpeta>]
@@ -18,6 +19,7 @@ const USAGE: &str = "Uso:
   docpack build <archivo> [--project <carpeta>] [--no-pages] [--force]
   docpack text <archivo> --pages 4-5 [--project <carpeta>]
   docpack read <archivo o pack> [--section S05 [--part 2]] [--table T03 [--rows 1-50]] [--project <carpeta>]
+  docpack guide
   docpack find \"<texto>\" [--project <carpeta>] [--limit N] [--pack <nombre>] [--in tablas|texto] [--color <nombre o RRGGBB>]
   docpack diff <pack o documento> <pack o documento> [--project <carpeta>]
   docpack doctor [--project <carpeta>]
@@ -33,6 +35,7 @@ fn main() {
         Some("build") => cmd_build(rest),
         Some("text") => cmd_text(rest),
         Some("read") => cmd_read(rest),
+        Some("guide") => { print!("{}", docpack::AUDIT_GUIDE); 0 }
         Some("find") => cmd_find(rest),
         Some("diff") => cmd_diff(rest),
         Some("doctor") => cmd_doctor(rest),
