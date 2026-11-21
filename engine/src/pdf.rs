@@ -1262,7 +1262,12 @@ pub fn extract(bytes: &[u8]) -> Result<Document, String> {
     let pictures: Vec<u32> = collector.pages.iter().enumerate().filter(|(_, p)| is_picture(p)).map(|(i, _)| i as u32 + 1).collect();
     let partial: Vec<u32> = collector.pages.iter().enumerate().filter(|(_, p)| !is_picture(p) && p.area > 0.0 && p.image_area >= p.area / 4.0).map(|(i, _)| i as u32 + 1).collect();
     let damaged_pages: Vec<u32> = pages_text.iter().enumerate().filter(|(i, t)| !pictures.contains(&(*i as u32 + 1)) && damaged(&color::strip_tags(t))).map(|(i, _)| i as u32 + 1).collect();
-    let mut asked: Vec<u32> = pictures.iter().chain(&partial).chain(&damaged_pages).copied().collect();
+    // And every page with no letter of text, however its picture is drawn:
+    // a scanner may write it inside the page's content (an inline image) or
+    // in a pattern, where no image is measured, and the page came out blank
+    // without a word. OCR of a page that is really empty finds nothing.
+    let blank: Vec<u32> = pages_text.iter().enumerate().filter(|(_, t)| letters(&color::strip_tags(t)) == 0).map(|(i, _)| i as u32 + 1).collect();
+    let mut asked: Vec<u32> = pictures.iter().chain(&partial).chain(&damaged_pages).chain(&blank).copied().collect();
     asked.sort();
     asked.dedup();
     let mut by_ocr = HashSet::new();
@@ -1301,7 +1306,10 @@ pub fn extract(bytes: &[u8]) -> Result<Document, String> {
                 if !pictures.is_empty() {
                     doc.notes.push(format!("No se pudo leer el texto de {}, que {} ({e}): mira paginas/.", pages_list(&pictures), if pictures.len() == 1 { "es una imagen" } else { "son imágenes" }));
                 }
-                doc.notes.push(format!("Sin OCR ({e}): las imágenes con texto de estas páginas no se leyeron."));
+                let others: Vec<u32> = asked.iter().copied().filter(|n| !pictures.contains(n)).collect();
+                if !others.is_empty() {
+                    doc.notes.push(format!("Sin OCR ({e}): {} no se pudieron leer por imagen (sin texto propio, con texto dañado o con una imagen grande): mira paginas/.", pages_list(&others)));
+                }
             }
         }
     }
@@ -1309,7 +1317,7 @@ pub fn extract(bytes: &[u8]) -> Result<Document, String> {
         let i = (n - 1) as usize;
         let reason = if by_ocr.contains(&n) { "ocr" }
             else if damaged(&color::strip_tags(&pages_text[i])) { "texto_dañado" }
-            else if pictures.contains(&n) && letters(&color::strip_tags(&pages_text[i])) == 0 { "sin_texto" }
+            else if letters(&color::strip_tags(&pages_text[i])) == 0 { "sin_texto" }
             else if partial.contains(&n) || pictures.contains(&n) { "imagen_sin_ocr" }
             else { continue };
         // A page OCR read and found nothing new in keeps its own text.

@@ -1,5 +1,16 @@
 # Cambios
 
+## 0.4.11
+
+- Toda página sin texto pasa por OCR, se dibuje como se dibuje su imagen.
+  Antes solo se mandaban a OCR las páginas con una imagen detectada que
+  cubriera media hoja. Algunos escáneres escriben la imagen dentro del
+  contenido de la página (imagen en línea) o en un patrón, donde no se mide,
+  y esas páginas salían en blanco sin aviso; lo encontró Juan González
+  Salazar en un expediente de cien documentos. Si el OCR tampoco lee nada,
+  o no hay OCR en el equipo, la página queda marcada `sin_texto`, con su
+  imagen en `paginas/`, y una búsqueda sin resultados la menciona.
+
 ## 0.4.10
 
 Sigue la mejora propuesta por Juan González Salazar, ahora con un

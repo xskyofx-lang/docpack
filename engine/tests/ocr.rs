@@ -3,6 +3,27 @@
 //! is set (CI installs one and sets it).
 use docpack::extract;
 
+/// A scanned page whose picture is written inside the page's content (an
+/// inline image, tests/fixtures/escaneo_en_linea_pdf.py) has no image object
+/// to measure: it is read by OCR because it has no text, not because of how
+/// its picture is drawn. Without OCR it is marked as a page without text,
+/// never left blank without a word.
+#[test]
+fn a_page_without_text_is_read_by_ocr_however_its_picture_is_drawn() {
+    let doc = extract(include_bytes!("fixtures/escaneo_en_linea.pdf"), "pdf").unwrap();
+    if doc.ocr.is_none() {
+        assert!(std::env::var_os("DOCPACK_REQUIRE_OCR").is_none(), "se pidió OCR y no hubo: {:?}", doc.notes);
+        assert_eq!(doc.doubtful_pages.get(&1), Some(&"sin_texto"), "{:?}", doc.doubtful_pages);
+        assert!(doc.notes.join(" ").contains("no se pudieron leer por imagen"), "{:?}", doc.notes);
+        return;
+    }
+    let text = &doc.sections[0].text;
+    for words in ["CONSTANCIA DE VISITA", "inspector y oferente"] {
+        assert!(text.contains(words), "{words:?} not in {text:?}");
+    }
+    assert_eq!(doc.doubtful_pages.get(&1), Some(&"ocr"));
+}
+
 /// A page with its own text and a scanned certificate pasted in (a third of
 /// the page, tests/fixtures/escaneo_parcial_pdf.py): its own text stays, the
 /// certificate's lines are added by OCR, and the page is marked as read by
