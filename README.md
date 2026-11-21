@@ -324,12 +324,13 @@ cargo install --git https://github.com/xskyofx-lang/docpack docpack --locked
 | `docpack read <file> [--section S05 [--part 2]] [--table T03 [--rows 1-50]]` | The index (with the pack's notes), a section or one part of it, or a table with its formulas and colors: for an agent without a file reader |
 | `docpack find "text"` | Search every pack of the project: pack, section or table, page and line. Filters: `--pack`, `--in tablas`, `--in texto` |
 | `docpack find "fine \| penalty \| sanction"` | Several ways of saying one thing in one search; each hit says which it matched. With no hits, it says what the search could not see (pages read by OCR or without text, documents without a pack) |
+| `docpack coverage requirements.txt` | A coverage matrix in one pass: each requirement (`name = way \| other way`, parts indented below) found or not, with its best places cited and its document's date. Evidence to read, not a verdict |
 | `docpack guide` | How to audit many documents with DocPack: for an agent (also the MCP tool `docpack_guide`) |
 | `docpack find --color pink` | What the documents mark in that color: name in English or Spanish (`pink`, `rosa`) or hex (`--color FF00FF`) |
 | `docpack diff <old> <new>` | What changed between two versions: sections and table rows |
 | `docpack doctor` | Half-built or outdated packs, foreign files and documents with no pack |
 | `docpack catalog` | Rewrites `docpack/index.json` (it also updates with every pack) |
-| `docpack mcp` | MCP server over stdio: `docpack_build`, `docpack_read`, `docpack_text`, `docpack_find`, `docpack_diff`, `docpack_guide`, `docpack_catalog`, `docpack_doctor` |
+| `docpack mcp` | MCP server over stdio: `docpack_build`, `docpack_read`, `docpack_text`, `docpack_find`, `docpack_diff`, `docpack_coverage`, `docpack_guide`, `docpack_catalog`, `docpack_doctor` |
 
 All of them take `--project <folder>`. A `.docpackignore` file in the project
 (one pattern per line, such as `export_*.xls`) leaves out data files that are

@@ -1,5 +1,20 @@
 # Cambios
 
+## 0.4.12
+
+Pedido por Juan González Salazar para expedientes pesados.
+
+- Matriz de cobertura: `docpack coverage requisitos.txt` y la herramienta
+  MCP `docpack_coverage` revisan una lista de requisitos de una sola vez,
+  sin una búsqueda del modelo por requisito. Cada línea es un requisito
+  (`nombre = una forma | otra forma`) y las líneas con sangría son sus
+  partes; también acepta la lista en JSON. Para cada requisito y parte dice
+  si se encontró, en cuántos lugares y documentos, y sus mejores lugares
+  citados (documento, sección o tabla y celda, página física e impresa) con
+  la fecha de su documento, para ver las circulares posteriores. Lo que no
+  se encontró trae una vez lo que las búsquedas no pudieron ver. Es
+  evidencia para leer, no un veredicto: DocPack encuentra palabras.
+
 ## 0.4.11
 
 - Toda página sin texto pasa por OCR, se dibuje como se dibuje su imagen.

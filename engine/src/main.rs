@@ -1,6 +1,7 @@
 //! docpack build <archivo> [--project <carpeta>] [--no-pages] [--force]
 //! docpack text <archivo> --pages 4-5 [--project <carpeta>]
 //! docpack read <archivo o pack> [--section S05 [--part 2]] [--table T03 [--rows 1-50]] [--project <carpeta>]
+//! docpack coverage <requisitos.txt|json> [--limit 3] [--pack <nombre>] [--in tablas|texto] [--project <carpeta>]
 //! docpack guide              (how to audit many documents with DocPack)
 //! docpack find "<texto>" [--project <carpeta>] [--limit N]
 //! docpack diff <pack o documento> <pack o documento> [--project <carpeta>]
@@ -19,6 +20,7 @@ const USAGE: &str = "Uso:
   docpack build <archivo> [--project <carpeta>] [--no-pages] [--force]
   docpack text <archivo> --pages 4-5 [--project <carpeta>]
   docpack read <archivo o pack> [--section S05 [--part 2]] [--table T03 [--rows 1-50]] [--project <carpeta>]
+  docpack coverage <requisitos.txt o .json> [--limit 3] [--pack <nombre>] [--in tablas|texto] [--project <carpeta>]
   docpack guide
   docpack find \"<texto>\" [--project <carpeta>] [--limit N] [--pack <nombre>] [--in tablas|texto] [--color <nombre o RRGGBB>]
   docpack diff <pack o documento> <pack o documento> [--project <carpeta>]
@@ -35,6 +37,7 @@ fn main() {
         Some("build") => cmd_build(rest),
         Some("text") => cmd_text(rest),
         Some("read") => cmd_read(rest),
+        Some("coverage") => cmd_coverage(rest),
         Some("guide") => { print!("{}", docpack::AUDIT_GUIDE); 0 }
         Some("find") => cmd_find(rest),
         Some("diff") => cmd_diff(rest),
@@ -127,6 +130,19 @@ fn cmd_read(args: &[String]) -> i32 {
     } else { pack_of(&project, given, &options) };
     let what = library::Read { section: args.flags.get("section").cloned(), part, table: args.flags.get("table").cloned(), rows: args.flags.get("rows").cloned() };
     match library::read(&pack, &what) { Ok(text) => { print!("{text}"); 0 } Err(e) => fail(e) }
+}
+
+/// A coverage matrix: each requirement of a list (and each of its parts)
+/// searched in every pack at once, with the best places that say it.
+fn cmd_coverage(args: &[String]) -> i32 {
+    let args = parsed!(args, &["project", "limit", "pack", "in"], &[]);
+    let [file] = args.words.as_slice() else { eprintln!("Falta la lista de requisitos\n{USAGE}"); return 2 };
+    let only = args.flags.get("in").cloned();
+    if only.as_deref().is_some_and(|o| o != "tablas" && o != "texto") { eprintln!("--in es tablas o texto\n{USAGE}"); return 2 }
+    let text = match std::fs::read_to_string(file) { Ok(t) => t, Err(e) => return fail(format!("{file}: {e}")) };
+    let requirements = match library::parse_requirements(&text) { Ok(r) => r, Err(e) => return fail(e) };
+    let opts = library::Find { limit: args.flags.get("limit").and_then(|l| l.parse().ok()).unwrap_or(3), pack: args.flags.get("pack").cloned(), only, color: None };
+    print_json(&library::coverage(&project(&args).join("docpack"), &requirements, &opts))
 }
 
 fn cmd_find(args: &[String]) -> i32 {

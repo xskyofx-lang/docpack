@@ -651,3 +651,103 @@ fn glob(pattern: &[u8], text: &[u8]) -> bool {
         Some(c) => text.first() == Some(c) && glob(&pattern[1..], &text[1..]),
     }
 }
+
+/// A requirement to look for: its name, the ways the documents may word it
+/// (a query with `|`), and the parts that must each be shown.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct Requirement { pub name: String, pub query: String, pub parts: Vec<Requirement> }
+
+/// Requirements from a text, one per line (`#` comments): `name = ways`
+/// (`Garantía de seriedad = garantía de seriedad | boleta de garantía`), or
+/// only the ways, which also name it. An indented line is a part of the
+/// requirement above it (`  monto = monto | valor`). A text that starts with
+/// `[` is the same list in JSON: `[{"name", "query", "parts": [...]}]`.
+pub fn parse_requirements(text: &str) -> Result<Vec<Requirement>, String> {
+    let text = text.trim_start_matches('\u{feff}');
+    if text.trim_start().starts_with('[') {
+        let list: Value = serde_json::from_str(text).map_err(|e| format!("Lista de requisitos en JSON ilegible: {e}"))?;
+        return requirements_of(&list);
+    }
+    let mut out: Vec<Requirement> = Vec::new();
+    for (n, line) in text.lines().enumerate() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() || trimmed.starts_with('#') { continue }
+        let (name, query) = match trimmed.split_once('=') {
+            Some((name, query)) => (name.trim(), query.trim()),
+            None => (trimmed, trimmed),
+        };
+        if query.is_empty() { return Err(format!("Línea {}: falta qué buscar después de «=»", n + 1)) }
+        let item = Requirement { name: name.to_string(), query: query.to_string(), parts: Vec::new() };
+        if line.starts_with([' ', '\t']) {
+            out.last_mut().ok_or_else(|| format!("Línea {}: una parte (con sangría) necesita un requisito arriba", n + 1))?.parts.push(item);
+        } else {
+            out.push(item);
+        }
+    }
+    if out.is_empty() { return Err("La lista no tiene requisitos".into()) }
+    Ok(out)
+}
+
+/// Requirements given as JSON (the MCP tool's argument, or a .json list).
+pub fn requirements_of(list: &Value) -> Result<Vec<Requirement>, String> {
+    let items = list.as_array().ok_or("Los requisitos van en una lista")?;
+    let one = |v: &Value| -> Result<Requirement, String> {
+        let query = v["query"].as_str().or(v["name"].as_str()).map(str::trim).filter(|q| !q.is_empty()).ok_or("Cada requisito necesita query (o name)")?;
+        Ok(Requirement { name: v["name"].as_str().unwrap_or(query).trim().to_string(), query: query.to_string(), parts: Vec::new() })
+    };
+    let out = items.iter().map(|v| {
+        let mut r = one(v)?;
+        r.parts = v["parts"].as_array().map(|p| p.iter().map(one).collect::<Result<Vec<_>, _>>()).transpose()?.unwrap_or_default();
+        Ok(r)
+    }).collect::<Result<Vec<_>, String>>()?;
+    if out.is_empty() { return Err("La lista no tiene requisitos".into()) }
+    Ok(out)
+}
+
+/// A coverage matrix in one pass: for each requirement and each of its parts,
+/// the places of the packs that say it (the best `limit`, each cited and with
+/// its document's date, to tell later documents that change earlier ones),
+/// or none. It finds words, not meaning: a place found is evidence to read,
+/// not a verdict. What the searches could not see (pages whose text may be
+/// incomplete, documents without a pack) is said once, when anything went
+/// unfound.
+pub fn coverage(root: &Path, requirements: &[Requirement], opts: &Find) -> Value {
+    let dates: HashMap<String, Value> = packs(root).into_iter().map(|(dir, m)| (name_of(&dir), m["document"]["date"].clone())).filter(|(_, d)| !d.is_null()).collect();
+    let mut missing = 0;
+    // Every hit, to count the documents that say it; the best `limit` shown.
+    let all = Find { limit: usize::MAX, ..opts.clone() };
+    let mut look = |r: &Requirement| -> Value {
+        let found = find_with(root, &r.query, &all);
+        let total = found["total"].as_u64().unwrap_or(0);
+        if total == 0 { missing += 1 }
+        let every = found["hits"].as_array().cloned().unwrap_or_default();
+        // How many documents say it: a requirement met in one of fifty is not
+        // met in the other forty-nine.
+        let mut in_packs: Vec<&str> = every.iter().filter_map(|h| h["pack"].as_str()).collect();
+        in_packs.sort();
+        in_packs.dedup();
+        let hits: Vec<Value> = every.iter().take(opts.limit.max(1)).cloned().map(|mut h| {
+            if let Some(d) = h["pack"].as_str().and_then(|p| dates.get(p)) { h["date"] = d.clone() }
+            h
+        }).collect();
+        crate::compact(json!({"name": r.name, "query": r.query, "found": total > 0, "total": total, "packs": in_packs.len(), "hits": hits}))
+    };
+    let rows: Vec<Value> = requirements.iter().map(|r| {
+        let mut row = look(r);
+        let parts: Vec<Value> = r.parts.iter().map(&mut look).collect();
+        if !parts.is_empty() { row["parts"] = json!(parts) }
+        row
+    }).collect();
+    let asked = requirements.iter().map(|r| 1 + r.parts.len()).sum::<usize>();
+    let mut out = json!({
+        "note": "Evidencia candidata, no un veredicto: DocPack encuentra palabras. Lee cada lugar citado antes de decir que un requisito se cumple; uno sin resultados no está probado ausente (mira not_found).",
+        "requirements": rows,
+        "summary": {"asked": asked, "found": asked - missing, "not_found": missing},
+    });
+    if missing > 0 {
+        let mut unseen = unseen(root, opts, 2);
+        if let Some(o) = unseen.as_object_mut() { o.remove("note"); }
+        out["not_found"] = unseen;
+    }
+    out
+}

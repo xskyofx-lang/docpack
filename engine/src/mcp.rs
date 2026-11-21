@@ -35,7 +35,7 @@ Never open the original document (no file read, no script that opens it): read i
 2) Read only the sections the question needs (docpack_read section), a long one by part (part), and only the tables they name (docpack_read table, rows for a large one); tables bring their colors and formulas. \
 3) To find something without knowing where it is, docpack_find searches every pack: words, a color (rosa/pink, rojo/red, gris/gray… or RRGGBB) or only tables or text; each hit gives section or table and row, part, line and page. \
 4) docpack_text gives given pages; docpack_diff compares two versions. \
-Before auditing or reviewing several documents (requirements, absences, spreadsheets, later documents that change earlier ones), call docpack_guide once: it says how to search every way a document may word a thing (find takes several apart with |), why an empty search is not proof (find says what it could not see) and how to cite. \
+Before auditing or reviewing several documents (requirements, absences, spreadsheets, later documents that change earlier ones), call docpack_guide once, and check a list of requirements in one call with docpack_coverage: it says how to search every way a document may word a thing (find takes several apart with |), why an empty search is not proof (find says what it could not see) and how to cite. \
 Cite section, table and page; when a page carries 'impresa N', the document numbers its pages apart: quote the printed number. An agent that can read files may open the pack's files instead (index.json, secciones/*.md, tablas/Tnn.csv, Tnn.colores.json, Tnn.formulas.json).";
 
 fn tool_definitions() -> Value {
@@ -111,6 +111,21 @@ fn tool_definitions() -> Value {
                     "project": project
                 },
                 "required": ["old", "new"]
+            }
+        },
+        {
+            "name": "docpack_coverage",
+            "description": "A coverage matrix in one call: a list of requirements (each with every way the documents may word it apart with |, and the parts that must each be shown) searched in every pack at once. For each requirement and part: found or not, how many places and documents, and the best places cited (pack, section or table and cell, page and printed page, the document's date to tell later documents that change earlier ones). It finds words, not meaning: a place found is evidence to read before saying a requirement is met. When something is not found, not_found says once what the searches could not see (doubtful pages, documents without a pack). Saves asking requirement by requirement.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "requirements": { "type": "array", "description": "Requirements: {name, query, parts: [{name, query}]}; query holds the ways apart with |", "items": { "type": "object", "properties": { "name": { "type": "string" }, "query": { "type": "string" }, "parts": { "type": "array", "items": { "type": "object", "properties": { "name": { "type": "string" }, "query": { "type": "string" } } } } } } },
+                    "file": { "type": "string", "description": "Instead of requirements: a list in the project, one per line ('name = ways', indented lines are parts) or JSON" },
+                    "limit": { "type": "integer", "description": "Places shown per requirement or part (default 3)" },
+                    "pack": { "type": "string", "description": "Only this pack" },
+                    "in": { "type": "string", "enum": ["tablas", "texto"], "description": "Only tables or only text" },
+                    "project": project
+                }
             }
         },
         {
@@ -196,6 +211,24 @@ fn call_tool(name: &str, args: &Value) -> Result<String, String> {
             };
             let diff = library::diff(&pack_of(&proj, &local(old), &opts), &pack_of(&proj, &local(new), &opts))?;
             Ok(serde_json::to_string_pretty(&diff).unwrap_or_default())
+        }
+        "docpack_coverage" => {
+            let requirements = match (args.get("requirements"), args.get("file").and_then(Value::as_str)) {
+                (Some(list), _) => library::requirements_of(list)?,
+                (None, Some(_)) => {
+                    let path = document(args, &proj)?;
+                    library::parse_requirements(&std::fs::read_to_string(&path).map_err(|e| format!("{}: {e}", path.display()))?)?
+                }
+                (None, None) => return Err("Faltan requirements (o file con la lista)".into()),
+            };
+            let opts = library::Find {
+                limit: args.get("limit").and_then(Value::as_u64).unwrap_or(3) as usize,
+                pack: args.get("pack").and_then(Value::as_str).map(str::to_string),
+                only: args.get("in").and_then(Value::as_str).map(str::to_string),
+                color: None,
+            };
+            let res = library::coverage(&proj.join("docpack"), &requirements, &opts);
+            Ok(serde_json::to_string_pretty(&res).unwrap_or_default())
         }
         "docpack_guide" => Ok(docpack::AUDIT_GUIDE.to_string()),
         "docpack_catalog" => {
@@ -291,7 +324,7 @@ mod tests {
     #[test]
     fn a_byte_order_mark_or_a_bad_line_still_gets_an_answer() {
         let listed = reply_to_line("\u{feff}{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/list\"}\r").unwrap();
-        assert_eq!(listed["result"]["tools"].as_array().unwrap().len(), 8);
+        assert_eq!(listed["result"]["tools"].as_array().unwrap().len(), 9);
         let bad = reply_to_line("{bad json").unwrap();
         assert_eq!(bad["error"]["code"], -32700);
         assert!(bad["id"].is_null());
@@ -311,7 +344,7 @@ mod tests {
         let unknown = handle_message(&json!({"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"1999-01-01"}})).unwrap();
         assert_eq!(unknown["result"]["protocolVersion"], PROTOCOLS[0]);
         let list = handle_message(&json!({"jsonrpc":"2.0","id":2,"method":"tools/list"})).unwrap();
-        assert_eq!(list["result"]["tools"].as_array().unwrap().len(), 8);
+        assert_eq!(list["result"]["tools"].as_array().unwrap().len(), 9);
         // A client without the DocPack skill still learns the rule and the
         // way through a pack when it connects.
         let told = init["result"]["instructions"].as_str().unwrap();
@@ -346,6 +379,12 @@ mod tests {
         std::fs::remove_file(project.path().join("tablas.pdf")).unwrap();
         let by_pack = call(7, "docpack_read", json!({"file":"tablas.pdf","section":"S01","project":root}));
         assert!(by_pack["content"][0]["text"].as_str().unwrap().starts_with("<!-- S01 · "), "{by_pack}");
+
+        // A list of requirements in one call.
+        let matrix = call(8, "docpack_coverage", json!({"project": root, "requirements": [{"name": "Códigos de error", "query": "E001 | código de error"}, {"query": "firma del notario"}]}));
+        assert_eq!(matrix["isError"], false, "{matrix}");
+        let matrix: Value = serde_json::from_str(matrix["content"][0]["text"].as_str().unwrap()).unwrap();
+        assert_eq!((matrix["requirements"][0]["found"].as_bool(), matrix["requirements"][1]["found"].as_bool()), (Some(true), Some(false)), "{matrix}");
 
         let found = call(5, "docpack_find", json!({"query":"Campos","project":root}));
         assert!(found["content"][0]["text"].as_str().unwrap().contains("tablas.pdf"));

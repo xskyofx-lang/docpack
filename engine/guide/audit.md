@@ -69,6 +69,23 @@ its amount"), and for each part record one of:
 
 Never mark a requirement met because a document "talks about" it.
 
+To check a whole list at once, without a search per requirement, give it to
+`docpack_coverage` (or `docpack coverage requisitos.txt`): one requirement
+per line, `name = ways | apart | with bars`, and its parts indented below.
+
+```
+Garantía de seriedad = garantía de seriedad | boleta de garantía | póliza de seriedad
+  monto = monto | valor | porcentaje
+  vigencia = vigencia | plazo de validez | días corridos
+Visita a terreno = visita a terreno | visita técnica | constancia de visita
+```
+
+It returns, for each requirement and part, whether it was found, in how many
+places and documents, and the best places cited with their document's date;
+what went unfound comes with what the searches could not see. It finds
+words: read every place it cites before you call a part **evidence**, and
+treat a part without places as section 6 says.
+
 ## 5. Later documents change earlier ones
 
 Circulars, answers to questions, addenda and corrections modify the rules.

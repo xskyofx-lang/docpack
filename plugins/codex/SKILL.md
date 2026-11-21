@@ -1,6 +1,6 @@
 ---
 name: docpack
-description: Read PDF, Word (DOCX), Excel (XLSX/XLS/ODS) and PowerPoint (PPTX) documents through their DocPack (MCP tools docpack_build, docpack_read, docpack_text, docpack_find, docpack_diff, docpack_guide) instead of the original file. Use whenever the person mentions, attaches by path, or asks about a document in one of these formats.
+description: Read PDF, Word (DOCX), Excel (XLSX/XLS/ODS) and PowerPoint (PPTX) documents through their DocPack (MCP tools docpack_build, docpack_read, docpack_text, docpack_find, docpack_diff, docpack_coverage, docpack_guide) instead of the original file. Use whenever the person mentions, attaches by path, or asks about a document in one of these formats.
 ---
 <!-- DocPack skill for OpenAI Codex. Adapted from plugins/claude-code/skills/docpack/SKILL.md (same rules, MCP tools instead of the hook): keep them in step. -->
 
@@ -19,7 +19,11 @@ amounts to reconcile between a spreadsheet and a PDF), read the guide once:
 `docpack guide`, or the MCP tool `docpack_guide`. It says how to survey and
 budget the reading, how to search every way a document may word a thing,
 how to treat later documents that change earlier ones, why an empty search
-is not proof that something is missing, and how to cite.
+is not proof that something is missing, and how to cite. To check a list
+of requirements in one call (a coverage matrix), use `docpack coverage
+requisitos.txt` or the MCP tool `docpack_coverage`: each requirement and
+part comes back found or not, with its best places cited; read them before
+saying a requirement is met.
 
 ## The rule
 
