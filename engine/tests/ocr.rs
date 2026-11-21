@@ -18,7 +18,9 @@ fn a_page_without_text_is_read_by_ocr_however_its_picture_is_drawn() {
         return;
     }
     let text = &doc.sections[0].text;
-    for words in ["CONSTANCIA DE VISITA", "inspector y oferente"] {
+    // Words, not a whole line: an OCR engine may misread a one-letter word
+    // (Vision on macOS read this page's "y" as a Cyrillic "у").
+    for words in ["CONSTANCIA DE VISITA", "inspector", "oferente", "accesos a la obra"] {
         assert!(text.contains(words), "{words:?} not in {text:?}");
     }
     assert_eq!(doc.doubtful_pages.get(&1), Some(&"ocr"));
