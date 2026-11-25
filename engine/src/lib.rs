@@ -410,6 +410,35 @@ fn fold_empty_headings(doc: &mut Document) {
     doc.sections = out;
 }
 
+/// An I/O step that Windows (or an antivirus, the indexer, another process
+/// holding a handle) can refuse for a moment: "Acceso denegado (os error 5)",
+/// a sharing violation (32) or a lock violation (33). It is tried again after
+/// short waits; when it still fails, the error names the operation and the
+/// paths involved, which a bare OS error does not.
+pub(crate) fn retry_io<T>(op: &str, paths: &[&Path], f: impl FnMut() -> std::io::Result<T>) -> Result<T, String> {
+    retry_io_with(&[25, 50, 100, 200, 400, 800], op, paths, f)
+}
+
+pub(crate) fn retry_io_with<T>(waits_ms: &[u64], op: &str, paths: &[&Path], mut f: impl FnMut() -> std::io::Result<T>) -> Result<T, String> {
+    let mut attempt = 0;
+    loop {
+        match f() {
+            Ok(value) => return Ok(value),
+            Err(e) => {
+                let busy = e.kind() == std::io::ErrorKind::PermissionDenied || matches!(e.raw_os_error(), Some(5 | 32 | 33));
+                if busy && attempt < waits_ms.len() {
+                    std::thread::sleep(std::time::Duration::from_millis(waits_ms[attempt]));
+                    attempt += 1;
+                    continue;
+                }
+                let shown = paths.iter().map(|p| p.display().to_string()).collect::<Vec<_>>().join(" → ");
+                let tries = if attempt > 0 { format!(" (tras {} intentos)", attempt + 1) } else { String::new() };
+                return Err(format!("{op} {shown}: {e}{tries}"));
+            }
+        }
+    }
+}
+
 fn write_pack(dir: &Path, source: &Path, bytes: &[u8], sha: &str, mut doc: Document, options: &Options, pages_pdf: Option<&[u8]>) -> Result<Built, String> {
     let io = |e: std::io::Error| e.to_string();
     let parent = dir.parent().ok_or("Carpeta de pack inválida")?;
@@ -652,20 +681,52 @@ fn write_pack(dir: &Path, source: &Path, bytes: &[u8], sha: &str, mut doc: Docum
             return Err(format!("{} existe y no es un pack de DocPack; no se sobrescribe", dir.display()));
         }
         let old = parent.join(format!(".{}.old-{}", dir.file_name().and_then(|n| n.to_str()).unwrap_or("pack"), std::process::id()));
-        let _ = std::fs::remove_dir_all(&old);
-        std::fs::rename(dir, &old).map_err(io)?;
-        if let Err(e) = std::fs::rename(&staging, dir) {
-            let _ = std::fs::rename(&old, dir);
-            let _ = std::fs::remove_dir_all(&staging);
-            return Err(e.to_string());
+        let _ = retry_io("borrar", &[&old], || if old.exists() { std::fs::remove_dir_all(&old) } else { Ok(()) });
+        if let Err(e) = retry_io("mover el pack anterior", &[dir, &old], || std::fs::rename(dir, &old)) {
+            // Nothing was replaced; the new extraction is kept to recover it.
+            return Err(format!("{e}. El pack anterior sigue intacto; la extracción nueva quedó en {} (cierra lo que tenga abierta la carpeta, p. ej. el antivirus o un explorador, y repite)", staging.display()));
         }
-        let _ = std::fs::remove_dir_all(&old);
+        if let Err(e) = retry_io("publicar el pack nuevo", &[&staging, dir], || std::fs::rename(&staging, dir)) {
+            let restored = retry_io("devolver el pack anterior", &[&old, dir], || std::fs::rename(&old, dir)).is_ok();
+            return Err(format!("{e}. {}; la extracción nueva quedó en {}", if restored { "El pack anterior se devolvió a su lugar" } else { "OJO: el pack anterior quedó en la carpeta .old-* junto al pack" }, staging.display()));
+        }
+        let _ = retry_io("borrar", &[&old], || std::fs::remove_dir_all(&old));
     } else {
-        std::fs::rename(&staging, dir).map_err(io)?;
+        retry_io("publicar el pack", &[&staging, dir], || std::fs::rename(&staging, dir)).map_err(|e| format!("{e}. La extracción quedó en {}", staging.display()))?;
     }
     // The folder's catalog, when the pack is in a project's docpack/.
     if parent.file_name().is_some_and(|n| n == "docpack") {
         if let Err(e) = library::write_catalog(parent) { eprintln!("docpack: no se pudo actualizar {}: {e}", parent.join("index.json").display()) }
     }
     Ok(Built { index: dir.join("index.json"), pack: dir.to_path_buf(), status: "built", sections: section_entries.len(), tables: table_entries.len(), page_images: page_images.len(), tokens_estimate: total })
+}
+
+#[cfg(test)]
+mod retry_tests {
+    use super::*;
+    use std::io::{Error, ErrorKind};
+
+    #[test]
+    fn a_busy_step_is_tried_again_until_it_works() {
+        let mut calls = 0;
+        let r = retry_io_with(&[1, 1, 1], "mover", &[Path::new("a")], || { calls += 1; if calls < 3 { Err(Error::from_raw_os_error(5)) } else { Ok(calls) } });
+        assert_eq!(r, Ok(3));
+    }
+
+    #[test]
+    fn a_step_that_stays_denied_names_the_operation_and_the_paths() {
+        let mut calls = 0;
+        let r: Result<(), String> = retry_io_with(&[1, 1], "mover el pack anterior", &[Path::new("pack"), Path::new(".pack.old-1")], || { calls += 1; Err(Error::new(ErrorKind::PermissionDenied, "Acceso denegado. (os error 5)")) });
+        let e = r.unwrap_err();
+        assert_eq!(calls, 3);
+        assert!(e.contains("mover el pack anterior pack → .pack.old-1") && e.contains("os error 5") && e.contains("3 intentos"), "{e}");
+    }
+
+    #[test]
+    fn other_errors_are_not_retried() {
+        let mut calls = 0;
+        let r: Result<(), String> = retry_io_with(&[1, 1], "leer", &[Path::new("x")], || { calls += 1; Err(Error::from(ErrorKind::NotFound)) });
+        assert!(r.is_err());
+        assert_eq!(calls, 1);
+    }
 }
