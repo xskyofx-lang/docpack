@@ -62,7 +62,7 @@ pub fn write_catalog(root: &Path) -> Result<PathBuf, String> {
     let path = root.join("index.json");
     let temp = root.join(format!(".index.json.tmp-{}", std::process::id()));
     std::fs::write(&temp, serde_json::to_string(&catalog).map_err(|e| e.to_string())?).map_err(|e| e.to_string())?;
-    std::fs::rename(&temp, &path).map_err(|e| { let _ = std::fs::remove_file(&temp); e.to_string() })?;
+    crate::retry_io("publicar el catálogo", &[&temp, &path], || std::fs::rename(&temp, &path)).map_err(|e| { let _ = std::fs::remove_file(&temp); e })?;
     Ok(path)
 }
 

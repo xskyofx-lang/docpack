@@ -1071,6 +1071,19 @@ fn pages_list(pages: &[u32]) -> String {
     if pages.len() == 1 { format!("la página {text}") } else { format!("las páginas {text}") }
 }
 
+/// The text of one page. The PDF reader panics (instead of returning an
+/// error) on objects it does not expect, such as a missing required key; one
+/// such page must not take the whole build down. `Err(None)` is an ordinary
+/// read error, `Err(Some(message))` a panic caught here.
+fn read_page_guarded(pdf: &pdf_extract::Document, collector: &mut Collector, n: u32) -> Result<(), Option<String>> {
+    use std::panic::{catch_unwind, AssertUnwindSafe};
+    match catch_unwind(AssertUnwindSafe(|| pdf_extract::output_doc_page(pdf, collector, n))) {
+        Ok(Ok(())) => Ok(()),
+        Ok(Err(_)) => Err(None),
+        Err(payload) => Err(Some(crate::panic_message(payload.as_ref()))),
+    }
+}
+
 pub fn extract(bytes: &[u8]) -> Result<Document, String> {
     let mut pdf = pdf_extract::Document::load_mem(bytes).map_err(|e| format!("PDF ilegible: {e}"))?;
     if pdf.is_encrypted() && pdf.decrypt("").is_err() { return Err("PDF protegido con contraseña".into()) }
@@ -1081,16 +1094,22 @@ pub fn extract(bytes: &[u8]) -> Result<Document, String> {
     let mut doc = Document { kind: "pdf", pages: Some(count), about: crate::about::pdf(&pdf), ..Default::default() };
     let mut collector = Collector::default();
     let mut unreadable = Vec::new();
+    let mut crashed: Vec<(u32, String)> = Vec::new();
     for n in &numbers {
         let before = collector.pages.len();
-        if pdf_extract::output_doc_page(&pdf, &mut collector, *n).is_err() {
+        if let Err(why) = read_page_guarded(&pdf, &mut collector, *n) {
             collector.pages.truncate(before);
             collector.pages.push(Page::default());
             unreadable.push(*n);
+            if let Some(why) = why { eprintln!("docpack: página {n} del PDF (etapa: lectura de texto): {why}"); crashed.push((*n, why)) }
         }
         if let Some(page) = collector.pages.last_mut() { draw(&pdf, page_ids[n], page); upright(page) }
     }
     if !unreadable.is_empty() { doc.notes.push(format!("Páginas que no se pudieron leer: {unreadable:?}.")) }
+    if !crashed.is_empty() {
+        let list = crashed.iter().map(|(n, why)| format!("{n} ({why})")).collect::<Vec<_>>().join("; ");
+        doc.notes.push(format!("El lector de PDF falló en la etapa de lectura de texto en estas páginas, que quedan sin texto (pasan a OCR si hay): {list}."));
+    }
 
     // Tables, page by page; one that goes on from the bottom of a page to the
     // top of the next with the same columns is the same table. Between the two

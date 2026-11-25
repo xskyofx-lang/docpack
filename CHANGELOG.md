@@ -1,5 +1,22 @@
 # Cambios
 
+## 0.4.13
+
+- Un PDF con un objeto que el lector no espera (una clave obligatoria que
+  falta, una fuente sin `DescendantFonts`…) ya no tumba el proceso. Antes el
+  lector entraba en pánico: la CLI salía con código 101 y el servidor MCP
+  cerraba stdout sin responder. Ahora la página afectada queda sin texto (pasa
+  a OCR si hay), el documento sigue, y la nota del pack y stderr dicen la
+  etapa, la página y el mensaje. Un pánico en cualquier lector de formato
+  devuelve un error para ese archivo, y en el MCP un error JSON-RPC
+  (`-32603`) para esa llamada, con el proceso vivo.
+- «Acceso denegado (os error 5)» al publicar un pack en Windows: un
+  antivirus, el indexador u otro proceso pueden tener abierta la carpeta un
+  instante. Mover, publicar y devolver el pack se reintentan con esperas
+  cortas (hasta 1,5 s), y si siguen fallando el error dice la operación y las
+  rutas, y dónde quedó la extracción nueva (el pack anterior sigue intacto o
+  se devuelve a su lugar). Ya no se borra esa extracción al fallar.
+
 ## 0.4.12
 
 Pedido por Juan González Salazar para expedientes pesados.
