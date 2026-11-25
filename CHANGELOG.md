@@ -1,5 +1,16 @@
 # Cambios
 
+## Sin publicar
+
+- Un PDF con un objeto que el lector no espera (una clave obligatoria que
+  falta, una fuente sin `DescendantFonts`…) ya no tumba el proceso. Antes el
+  lector entraba en pánico: la CLI salía con código 101 y el servidor MCP
+  cerraba stdout sin responder. Ahora la página afectada queda sin texto (pasa
+  a OCR si hay), el documento sigue, y la nota del pack y stderr dicen la
+  etapa, la página y el mensaje. Un pánico en cualquier lector de formato
+  devuelve un error para ese archivo, y en el MCP un error JSON-RPC
+  (`-32603`) para esa llamada, con el proceso vivo.
+
 ## 0.4.12
 
 Pedido por Juan González Salazar para expedientes pesados.

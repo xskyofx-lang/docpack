@@ -304,14 +304,28 @@ fn slug(title: &str) -> String {
     if out.is_empty() { "seccion".into() } else { out }
 }
 
+/// The text of a caught panic's payload.
+#[doc(hidden)]
+pub fn panic_message(payload: &(dyn std::any::Any + Send)) -> String {
+    payload.downcast_ref::<&str>().map(|s| s.to_string())
+        .or_else(|| payload.downcast_ref::<String>().cloned())
+        .unwrap_or_else(|| "pánico sin mensaje".into())
+}
+
 pub fn extract(bytes: &[u8], ext: &str) -> Result<Document, String> {
-    let mut doc = match ext {
+    // A reader that panics on a strange file becomes an error for that file:
+    // a build of many documents (or the MCP process) goes on with the rest.
+    let read = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| match ext {
         "pdf" => pdf::extract(bytes),
         "docx" | "docm" => docx::extract(bytes),
         "pptx" => pptx::extract(bytes),
         "xlsx" | "xlsm" | "xls" | "xlsb" | "ods" => xlsx::extract(bytes, ext),
         other => Err(format!("Formato no compatible: .{other}")),
-    }?;
+    }));
+    let mut doc = match read {
+        Ok(result) => result?,
+        Err(payload) => return Err(format!("El lector de .{ext} falló al leer el archivo (etapa: extracción): {}", panic_message(payload.as_ref()))),
+    };
     if ext != "pdf" { doc.about = about::office(bytes) }
     for section in &mut doc.sections { section.contents = about::is_contents(&section.text) }
     Ok(doc)

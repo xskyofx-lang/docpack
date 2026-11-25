@@ -310,7 +310,13 @@ pub fn serve() -> i32 {
     let mut out = stdout.lock();
     for line in stdin.lock().lines() {
         let Ok(line) = line else { break };
-        if let Some(reply) = reply_to_line(&line) {
+        // A panic inside a tool is answered as an error to that request; the
+        // process (and the client's other calls) stays alive.
+        let reply = std::panic::catch_unwind(|| reply_to_line(&line)).unwrap_or_else(|payload| {
+            let id = serde_json::from_str::<Value>(line.trim().trim_start_matches('\u{feff}')).ok().and_then(|m| m.get("id").cloned());
+            id.map(|id| json!({ "jsonrpc": "2.0", "id": id, "error": { "code": -32603, "message": format!("Error interno de DocPack: {}", docpack::panic_message(payload.as_ref())) } }))
+        });
+        if let Some(reply) = reply {
             if writeln!(out, "{reply}").is_err() || out.flush().is_err() { break; }
         }
     }
@@ -320,6 +326,12 @@ pub fn serve() -> i32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_panic_message_is_recovered_from_its_payload() {
+        let caught = std::panic::catch_unwind(|| { let none: Option<u8> = None; none.expect("missing key") }).unwrap_err();
+        assert!(docpack::panic_message(caught.as_ref()).contains("missing key"));
+    }
 
     #[test]
     fn a_byte_order_mark_or_a_bad_line_still_gets_an_answer() {
